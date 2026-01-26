@@ -1,0 +1,9 @@
+gspread
+google-auth
+google-api-python-client
+requests
+beautifulsoup4
+gtts
+pydub
+Pillow
+duckduckgo_search
