@@ -107,10 +107,10 @@ def main():
     # 2. DEFINE THE IDs FIRST (This fixes your error)
     # Get this from your browser URL: /d/YOUR_ID_HERE/edit
     # REQUIRED: Change these to your actual details
-    SHEET_NAME = "1TK9pn9ILNUGdoNSGdvfgXngVLhuXERr4JqlY9maAKsU"
+    SPREADSHEET_ID = "1TK9pn9ILNUGdoNSGdvfgXngVLhuXERr4JqlY9maAKsU"
     DRIVE_FOLDER_ID = "1eLVLDtOpGn_6CXnt49VOVymEpNkmrldZ"
     
-print(f"📡 Connecting to Spreadsheet ID: {SPREADSHEET_ID}")
+    print(f"📡 Connecting to Spreadsheet ID: {SPREADSHEET_ID}")
     
     try:
         # 3. Use the defined variable to open the sheet
