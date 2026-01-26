@@ -127,7 +127,7 @@ def main():
     # Configuration from Sheet
     # Replace with your actual Sheet Name and Folder ID
     SHEET_NAME = "DramaBotQueue" 
-    DRIVE_FOLDER_ID = "Your_Google_Drive_Folder_ID" 
+    DRIVE_FOLDER_ID = "1eLVLDtOpGn_6CXnt49VOVymEpNkmrldZ" 
     
     sheet = gc.open(SHEET_NAME).get_worksheet(0)
     records = sheet.get_all_records()
