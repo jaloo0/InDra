@@ -124,7 +124,9 @@ def main():
 
     for i, row in enumerate(records):
         row_num = i + 2
-        if row.get('Status') == 'Pending':
+        # Process rows with empty status OR "Pending" status
+        status = row.get('Status', '').strip()
+        if status == '' or status == 'Pending':
             print(f"\n🚀 Processing: {row['Title']}")
             try:
                 sheet.update_cell(row_num, 3, "Processing")
