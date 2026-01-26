@@ -104,10 +104,16 @@ def main():
     gc = gspread.authorize(creds)
     
     # REQUIRED: Change these to your actual details
-    SHEET_NAME = "Your_Google_Sheet_Name"
+    SHEET_NAME = "1TK9pn9ILNUGdoNSGdvfgXngVLhuXERr4JqlY9maAKsU"
     DRIVE_FOLDER_ID = "1eLVLDtOpGn_6CXnt49VOVymEpNkmrldZ"
     
-    sheet = gc.open(SHEET_NAME).get_worksheet(0)
+    try:
+        # Use open_by_key for maximum stability
+        spreadsheet = gc.open_by_key(SPREADSHEET_ID)
+        sheet = spreadsheet.get_worksheet(0)
+    except Exception as e:
+        print(f"❌ Could not find Spreadsheet! Error: {e}")
+        return
     records = sheet.get_all_records()
 
     for i, row in enumerate(records):
