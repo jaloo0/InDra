@@ -100,19 +100,25 @@ def upload_to_drive(file_path, folder_id, creds):
 
 # --- MAIN AUTOMATION LOOP ---
 def main():
+    # 1. Initialize Credentials
     creds = get_gcp_credentials()
     gc = gspread.authorize(creds)
     
+    # 2. DEFINE THE IDs FIRST (This fixes your error)
+    # Get this from your browser URL: /d/YOUR_ID_HERE/edit
     # REQUIRED: Change these to your actual details
     SHEET_NAME = "1TK9pn9ILNUGdoNSGdvfgXngVLhuXERr4JqlY9maAKsU"
     DRIVE_FOLDER_ID = "1eLVLDtOpGn_6CXnt49VOVymEpNkmrldZ"
     
+print(f"📡 Connecting to Spreadsheet ID: {SPREADSHEET_ID}")
+    
     try:
-        # Use open_by_key for maximum stability
+        # 3. Use the defined variable to open the sheet
         spreadsheet = gc.open_by_key(SPREADSHEET_ID)
         sheet = spreadsheet.get_worksheet(0)
+        print("✅ Connection Successful!")
     except Exception as e:
-        print(f"❌ Could not find Spreadsheet! Error: {e}")
+        print(f"❌ Connection Failed: {e}")
         return
     records = sheet.get_all_records()
 
