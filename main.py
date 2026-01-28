@@ -91,12 +91,28 @@ def render_video(audio_path, output_path):
     cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True)
 
-def upload_to_drive(file_path, folder_id, creds):
-    drive_service = build('drive', 'v3', credentials=creds)
-    file_metadata = {'name': os.path.basename(file_path), 'parents': [folder_id]}
-    media = MediaFileUpload(file_path, mimetype='video/mp4')
-    file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    return file.get('id')
+def upload_to_gofile(file_path):
+    print("☁️ Uploading to GoFile for a direct link...")
+    try:
+        # 1. Get the best server to upload to
+        server_resp = requests.get("https://api.gofile.io/getServer").json()
+        server = server_resp['data']['server']
+        
+        # 2. Upload the file
+        url = f"https://{server}.gofile.io/uploadFile"
+        with open(file_path, "rb") as f:
+            response = requests.post(url, files={"file": f}).json()
+        
+        if response['status'] == 'ok':
+            download_page = response['data']['downloadPage']
+            print(f"✅ File available at: {download_page}")
+            return download_page
+        else:
+            print("❌ GoFile upload failed.")
+            return None
+    except Exception as e:
+        print(f"❌ GoFile Error: {e}")
+        return None
 
 # --- MAIN AUTOMATION LOOP ---
 def main():
@@ -104,23 +120,28 @@ def main():
     creds = get_gcp_credentials()
     gc = gspread.authorize(creds)
     
-    # 2. DEFINE THE IDs FIRST (This fixes your error)
-    # Get this from your browser URL: /d/YOUR_ID_HERE/edit
-    # REQUIRED: Change these to your actual details
+    # 2. Define Spreadsheet ID
     SPREADSHEET_ID = "1TK9pn9ILNUGdoNSGdvfgXngVLhuXERr4JqlY9maAKsU"
-    DRIVE_FOLDER_ID = "1eLVLDtOpGn_6CXnt49VOVymEpNkmrldZ"
     
     print(f"📡 Connecting to Spreadsheet ID: {SPREADSHEET_ID}")
     
     try:
-        # 3. Use the defined variable to open the sheet
+        # 3. Open the sheet
         spreadsheet = gc.open_by_key(SPREADSHEET_ID)
         sheet = spreadsheet.get_worksheet(0)
         print("✅ Connection Successful!")
     except Exception as e:
         print(f"❌ Connection Failed: {e}")
         return
+    
     records = sheet.get_all_records()
+    
+    print(f"📊 Found {len(records)} total rows in spreadsheet")
+    if len(records) > 0:
+        print(f"🔍 Column names: {list(records[0].keys())}")
+    
+    pending_count = sum(1 for row in records if row.get('Status', '').strip() in ['', 'Pending'])
+    print(f"⏳ Rows to process (empty or 'Pending' status): {pending_count}")
 
     for i, row in enumerate(records):
         row_num = i + 2
@@ -137,23 +158,36 @@ def main():
                 # 2. Images from Title
                 download_images(row['Title'])
                 
-                # 3. Assemble
+                # 3. Assemble Video
                 render_video("voice.mp3", OUTPUT_VIDEO)
                 
-                # 4. Save to Drive
-                file_id = upload_to_drive(OUTPUT_VIDEO, DRIVE_FOLDER_ID, creds)
+                # 4. Upload to GoFile (public link)
+                video_url = upload_to_gofile(OUTPUT_VIDEO)
                 
-                # 5. Update Sheet
-                sheet.update_cell(row_num, 3, "Completed")
-                sheet.update_cell(row_num, 4, f"https://drive.google.com/file/d/{file_id}")
+                if video_url:
+                    # 5. Update Sheet
+                    sheet.update_cell(row_num, 3, "Completed")
+                    sheet.update_cell(row_num, 4, video_url)
+                    print(f"✅ Updated sheet with link: {video_url}")
+                else:
+                    sheet.update_cell(row_num, 3, "Upload Failed")
                 
                 # Cleanup for next loop
                 if os.path.exists(DOWNLOAD_DIR):
-                    for f in os.listdir(DOWNLOAD_DIR): os.remove(os.path.join(DOWNLOAD_DIR, f))
+                    for f in os.listdir(DOWNLOAD_DIR): 
+                        os.remove(os.path.join(DOWNLOAD_DIR, f))
+                
+                # Clean up temp files
+                if os.path.exists("voice.mp3"): os.remove("voice.mp3")
+                if os.path.exists("list.txt"): os.remove("list.txt")
+                if os.path.exists(OUTPUT_VIDEO): os.remove(OUTPUT_VIDEO)
                 
             except Exception as e:
-                print(f"❌ Failed: {e}")
-                sheet.update_cell(row_num, 3, f"Error: {str(e)[:30]}")
+                import traceback
+                error_msg = traceback.format_exc()
+                print(f"❌ Failed processing '{row['Title']}':")
+                print(error_msg)
+                sheet.update_cell(row_num, 3, f"Error: {str(e)[:50]}")
 
 if __name__ == "__main__":
     main()
