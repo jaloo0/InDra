@@ -92,59 +92,47 @@ def render_video(audio_path, output_path):
     subprocess.run(cmd, shell=True)
 
 def upload_to_gofile(file_path):
-    print("☁️ Uploading to GoFile for a direct link...")
+    print("☁️ Uploading to GoFile (with backup server logic)...")
     try:
-        # 1. Get the best server to upload to
-        print("🔍 Getting GoFile server...")
-        server_resp = requests.get("https://api.gofile.io/servers", timeout=30)
-        print(f"📡 Server response status: {server_resp.status_code}")
+        # 1. Get an available server
+        server_resp = requests.get("https://api.gofile.io/getServer").json()
         
-        if server_resp.status_code != 200:
-            print(f"❌ Failed to get server. Response: {server_resp.text[:200]}")
-            return None
-        
-        server_data = server_resp.json()
-        if server_data['status'] != 'ok':
-            print(f"❌ Server API error: {server_data}")
-            return None
-            
-        # Get the first available server
-        server = server_data['data']['servers'][0]['name']
-        print(f"✅ Using server: {server}")
-        
+        if server_resp['status'] == 'ok':
+            server = server_resp['data']['server']
+        else:
+            # Fallback: Pick the first server from the backup list if 'server' is empty
+            print("⚠️ Main server busy, trying backup zones...")
+            server = server_resp['data']['serversAllZone'][0]['name']
+
         # 2. Upload the file
-        url = f"https://{server}.gofile.io/contents/uploadfile"
-        print(f"📤 Uploading to {url}...")
-        
+        upload_url = f"https://{server}.gofile.io/uploadFile"
         with open(file_path, "rb") as f:
-            files = {"file": (os.path.basename(file_path), f, "video/mp4")}
-            upload_resp = requests.post(url, files=files, timeout=300)
-        
-        print(f"📡 Upload response status: {upload_resp.status_code}")
-        
-        if upload_resp.status_code != 200:
-            print(f"❌ Upload failed. Response: {upload_resp.text[:200]}")
-            return None
-        
-        response = upload_resp.json()
+            response = requests.post(upload_url, files={"file": f}).json()
         
         if response['status'] == 'ok':
             download_page = response['data']['downloadPage']
-            print(f"✅ File available at: {download_page}")
+            print(f"✅ GoFile Success: {download_page}")
             return download_page
-        else:
-            print(f"❌ GoFile upload failed: {response}")
-            return None
             
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Network Error: {e}")
-        return None
     except Exception as e:
-        print(f"❌ GoFile Error: {e}")
-        import traceback
-        print(traceback.format_exc())
-        return None
-
+        print(f"⚠️ GoFile failed: {e}. Trying Backup: Catbox...")
+        
+    # --- BACKUP UPLOADER: Catbox.moe ---
+    try:
+        # Catbox is very reliable and requires no API key for small/medium files
+        catbox_url = "https://catbox.moe/user/api.php"
+        with open(file_path, "rb") as f:
+            data = {"reqtype": "fileupload"}
+            files = {"fileToUpload": f}
+            response = requests.post(catbox_url, data=data, files=files)
+        
+        if response.status_code == 200:
+            print(f"✅ Catbox Success: {response.text}")
+            return response.text
+    except Exception as e:
+        print(f"❌ All uploaders failed: {e}")
+        
+    return None
 # --- MAIN AUTOMATION LOOP ---
 def main():
     # 1. Initialize Credentials
