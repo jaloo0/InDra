@@ -1,7 +1,7 @@
 name: Video Automation Bot
 on:
   schedule:
-    - cron: '0 8-23/2 * * *' # Runs daily at 8 AM UTC
+    - cron: '0 8-23/1 * * *' # Runs daily at 8 AM UTC
   workflow_dispatch: # Allows manual run button
 
 jobs:
