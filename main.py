@@ -95,23 +95,54 @@ def upload_to_gofile(file_path):
     print("☁️ Uploading to GoFile for a direct link...")
     try:
         # 1. Get the best server to upload to
-        server_resp = requests.get("https://api.gofile.io/getServer").json()
-        server = server_resp['data']['server']
+        print("🔍 Getting GoFile server...")
+        server_resp = requests.get("https://api.gofile.io/servers", timeout=30)
+        print(f"📡 Server response status: {server_resp.status_code}")
+        
+        if server_resp.status_code != 200:
+            print(f"❌ Failed to get server. Response: {server_resp.text[:200]}")
+            return None
+        
+        server_data = server_resp.json()
+        if server_data['status'] != 'ok':
+            print(f"❌ Server API error: {server_data}")
+            return None
+            
+        # Get the first available server
+        server = server_data['data']['servers'][0]['name']
+        print(f"✅ Using server: {server}")
         
         # 2. Upload the file
-        url = f"https://{server}.gofile.io/uploadFile"
+        url = f"https://{server}.gofile.io/contents/uploadfile"
+        print(f"📤 Uploading to {url}...")
+        
         with open(file_path, "rb") as f:
-            response = requests.post(url, files={"file": f}).json()
+            files = {"file": (os.path.basename(file_path), f, "video/mp4")}
+            upload_resp = requests.post(url, files=files, timeout=300)
+        
+        print(f"📡 Upload response status: {upload_resp.status_code}")
+        
+        if upload_resp.status_code != 200:
+            print(f"❌ Upload failed. Response: {upload_resp.text[:200]}")
+            return None
+        
+        response = upload_resp.json()
         
         if response['status'] == 'ok':
             download_page = response['data']['downloadPage']
             print(f"✅ File available at: {download_page}")
             return download_page
         else:
-            print("❌ GoFile upload failed.")
+            print(f"❌ GoFile upload failed: {response}")
             return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Network Error: {e}")
+        return None
     except Exception as e:
         print(f"❌ GoFile Error: {e}")
+        import traceback
+        print(traceback.format_exc())
         return None
 
 # --- MAIN AUTOMATION LOOP ---
