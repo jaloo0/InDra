@@ -6,7 +6,6 @@ import subprocess
 import requests
 import gspread
 import time
-import shutil
 from PIL import Image
 from gtts import gTTS
 from pydub import AudioSegment
@@ -18,6 +17,8 @@ from youtube_transcript_api import YouTubeTranscriptApi
 # --- CONFIGURATION ---
 IMAGE_COUNT = 20
 TARGET_SIZE = (1920, 1080)
+DOWNLOAD_DIR = "video_images"
+OUTPUT_VIDEO = "drama_final_video.mp4"
 AUDIO_SPEEDUP_FACTOR = 1.25
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -42,7 +43,7 @@ def get_yt_data(url):
     except: return None, None
 
 def generate_audio(text, output_path):
-    temp_audio = f"temp_{time.time()}.mp3"
+    temp_audio = "temp_gtts.mp3"
     tts = gTTS(text=text, lang='hi')
     tts.save(temp_audio)
     audio = AudioSegment.from_file(temp_audio)
@@ -51,8 +52,8 @@ def generate_audio(text, output_path):
     if os.path.exists(temp_audio): os.remove(temp_audio)
     return output_path
 
-def download_images(query, download_dir):
-    if not os.path.exists(download_dir): os.makedirs(download_dir)
+def download_images(query):
+    if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)
     search_query = re.sub(r'[^\w\s\u0900-\u097F]', '', query)
     with DDGS() as ddgs:
         results = list(ddgs.images(search_query, max_results=IMAGE_COUNT + 10))
@@ -62,34 +63,35 @@ def download_images(query, download_dir):
         try:
             r = requests.get(res['image'], timeout=10)
             if r.status_code == 200:
-                temp_img = os.path.join(download_dir, "temp_raw.jpg")
-                with open(temp_img, "wb") as f: f.write(r.content)
-                with Image.open(temp_img) as img:
+                with open("temp.jpg", "wb") as f: f.write(r.content)
+                with Image.open("temp.jpg") as img:
                     img = img.convert("RGB").resize(TARGET_SIZE, Image.Resampling.LANCZOS)
-                    img.save(os.path.join(download_dir, f"img_{count}.jpg"), "JPEG")
+                    img.save(os.path.join(DOWNLOAD_DIR, f"img_{count}.jpg"), "JPEG")
                 count += 1
-                if os.path.exists(temp_img): os.remove(temp_img)
         except: continue
     return count
 
-def render_video(audio_path, output_path, download_dir, list_path):
-    img_files = sorted([f for f in os.listdir(download_dir) if f.endswith('.jpg')])
+def render_video(audio_path, output_path):
+    img_files = sorted([f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.jpg')])
     if not img_files: raise Exception("No images downloaded")
     
     cmd_dur = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audio_path]
     duration = float(subprocess.run(cmd_dur, stdout=subprocess.PIPE, check=True).stdout)
     img_dur = duration / len(img_files)
     
-    with open(list_path, "w") as f:
-        for img in img_files: 
-            f.write(f"file '{download_dir}/{img}'\nduration {img_dur}\n")
-        f.write(f"file '{download_dir}/{img_files[-1]}'\n")
+    with open("list.txt", "w") as f:
+        for img in img_files: f.write(f"file '{DOWNLOAD_DIR}/{img}'\nduration {img_dur}\n")
+        f.write(f"file '{DOWNLOAD_DIR}/{img_files[-1]}'\n")
 
-    cmd = f"ffmpeg -y -f concat -safe 0 -i {list_path} -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
+    # Added check=True to raise error if ffmpeg fails
+    cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True, check=True)
 
 def upload_to_gofile(file_path):
-    if not os.path.exists(file_path) or os.path.getsize(file_path) < 1000: return None
+    # Check if file exists and isn't empty before uploading
+    if not os.path.exists(file_path) or os.path.getsize(file_path) < 1000:
+        return None
+        
     try:
         server_resp = requests.get("https://api.gofile.io/getServer").json()
         server = server_resp['data']['server']
@@ -97,7 +99,9 @@ def upload_to_gofile(file_path):
             resp = requests.post(f"https://{server}.gofile.io/uploadFile", files={"file": f}).json()
             if resp['status'] == 'ok': return resp['data']['downloadPage']
     except: pass
+    
     try:
+        # Fallback to Catbox
         with open(file_path, "rb") as f:
             resp = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f})
             if resp.status_code == 200: return resp.text.strip()
@@ -110,18 +114,7 @@ def main():
 
     for i, row in enumerate(records):
         row_num = i + 2
-        
-        # 1. Unique File Paths for THIS specific row
-        row_download_dir = f"images_row_{row_num}"
-        row_voice = f"voice_row_{row_num}.mp3"
-        row_video = f"video_row_{row_num}.mp4"
-        row_list = f"list_row_{row_num}.txt"
-
         if row.get('Status', '').strip() in ['', 'Pending']:
-            # Double check status to avoid race conditions
-            current_status = sheet.cell(row_num, 4).value or ''
-            if current_status.strip() not in ['', 'Pending']: continue
-
             yt_link = str(row.get('YT Link', '')).strip()
             title = str(row.get('Title', '')).strip()
             script = str(row.get('Script', '')).strip()
@@ -137,12 +130,11 @@ def main():
 
             try:
                 sheet.update_cell(row_num, 4, "Processing")
+                generate_audio(script, "voice.mp3")
+                download_images(title)
+                render_video("voice.mp3", OUTPUT_VIDEO)
                 
-                generate_audio(script, row_voice)
-                download_images(title, row_download_dir)
-                render_video(row_voice, row_video, row_download_dir, row_list)
-                
-                video_url = upload_to_gofile(row_video)
+                video_url = upload_to_gofile(OUTPUT_VIDEO)
                 if video_url:
                     sheet.update_cell(row_num, 4, "Completed")
                     sheet.update_cell(row_num, 5, video_url)
@@ -153,10 +145,15 @@ def main():
                 sheet.update_cell(row_num, 4, f"Error: {str(e)[:30]}")
             
             finally:
-                # Guaranteed cleanup for THIS row's temporary files only
-                if os.path.exists(row_download_dir): shutil.rmtree(row_download_dir)
-                for tmp in [row_voice, row_video, row_list]:
-                    if os.path.exists(tmp): os.remove(tmp)
+                # GUARANTEED CLEANUP: Runs even if the code crashes
+                if os.path.exists(DOWNLOAD_DIR):
+                    for f in os.listdir(DOWNLOAD_DIR): 
+                        try: os.remove(os.path.join(DOWNLOAD_DIR, f))
+                        except: pass
+                for tmp in ["voice.mp3", "list.txt", "temp.jpg", OUTPUT_VIDEO]:
+                    if os.path.exists(tmp): 
+                        try: os.remove(tmp)
+                        except: pass
 
 if __name__ == "__main__":
     main()
