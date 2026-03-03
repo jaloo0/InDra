@@ -22,5 +22,7 @@ jobs:
 
       - name: Run Automation
         env:
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+            GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+            GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+            GDRIVE_SERVICE_TOKEN: ${{ secrets.GDRIVE_SERVICE_TOKEN }}
         run: python main.py
