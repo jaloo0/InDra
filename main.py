@@ -133,6 +133,49 @@ def upload_to_gofile(file_path):
         print(f"❌ All uploaders failed: {e}")
         
     return None
+
+# --- GOOGLE DRIVE UPLOAD ---
+def upload_to_drive(file_path, title):
+    """Uploads the final video to Google Drive using GDRIVE_SERVICE_TOKEN
+    and stores it inside GDRIVE_FOLDER_ID. Returns a shareable link."""
+    print("📤 Uploading to Google Drive...")
+    try:
+        folder_id = os.environ['GDRIVE_FOLDER_ID']
+        service_token_info = json.loads(os.environ['GDRIVE_SERVICE_TOKEN'])
+
+        creds = Credentials.from_service_account_info(
+            service_token_info,
+            scopes=['https://www.googleapis.com/auth/drive']
+        )
+        drive_service = build('drive', 'v3', credentials=creds)
+
+        # Upload the file into the specified folder
+        file_metadata = {
+            'name': f"{title}.mp4",
+            'parents': [folder_id]
+        }
+        media = MediaFileUpload(file_path, mimetype='video/mp4', resumable=True)
+        uploaded = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+
+        file_id = uploaded.get('id')
+
+        # Make the file publicly viewable
+        drive_service.permissions().create(
+            fileId=file_id,
+            body={'type': 'anyone', 'role': 'reader'}
+        ).execute()
+
+        share_link = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
+        print(f"✅ Drive Upload Success: {share_link}")
+        return share_link
+
+    except Exception as e:
+        print(f"❌ Google Drive upload failed: {e}")
+        return None
 # --- MAIN AUTOMATION LOOP ---
 def main():
     # 1. Initialize Credentials
@@ -182,12 +225,16 @@ def main():
                 
                 # 4. Upload to GoFile (public link)
                 video_url = upload_to_gofile(OUTPUT_VIDEO)
+
+                # 5. Upload to Google Drive
+                drive_url = upload_to_drive(OUTPUT_VIDEO, row['Title'])
                 
-                if video_url:
-                    # 5. Update Sheet
+                if video_url or drive_url:
+                    # 6. Update Sheet
                     sheet.update_cell(row_num, 3, "Completed")
-                    sheet.update_cell(row_num, 4, video_url)
-                    print(f"✅ Updated sheet with link: {video_url}")
+                    sheet.update_cell(row_num, 4, video_url or "")
+                    sheet.update_cell(row_num, 5, drive_url or "")
+                    print(f"✅ Updated sheet — GoFile: {video_url} | Drive: {drive_url}")
                 else:
                     sheet.update_cell(row_num, 3, "Upload Failed")
                 
