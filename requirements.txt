@@ -6,5 +6,5 @@ beautifulsoup4
 gtts
 pydub
 Pillow
-duckduckgo_search
+ddgs
 youtube-transcript-api
