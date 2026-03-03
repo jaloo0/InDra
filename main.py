@@ -10,7 +10,7 @@ from PIL import Image
 from gtts import gTTS
 from pydub import AudioSegment
 from pydub.effects import speedup
-from duckduckgo_search import DDGS
+from ddgs import DDGS 
 from google.oauth2.service_account import Credentials
 from youtube_transcript_api import YouTubeTranscriptApi
 
@@ -73,7 +73,7 @@ def download_images(query):
 
 def render_video(audio_path, output_path):
     img_files = sorted([f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.jpg')])
-    if not img_files: raise Exception("No images downloaded")
+    if not img_files: raise Exception("No images found")
     
     cmd_dur = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audio_path]
     duration = float(subprocess.run(cmd_dur, stdout=subprocess.PIPE, check=True).stdout)
@@ -83,15 +83,11 @@ def render_video(audio_path, output_path):
         for img in img_files: f.write(f"file '{DOWNLOAD_DIR}/{img}'\nduration {img_dur}\n")
         f.write(f"file '{DOWNLOAD_DIR}/{img_files[-1]}'\n")
 
-    # Added check=True to raise error if ffmpeg fails
     cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True, check=True)
 
 def upload_to_gofile(file_path):
-    # Check if file exists and isn't empty before uploading
-    if not os.path.exists(file_path) or os.path.getsize(file_path) < 1000:
-        return None
-        
+    if not os.path.exists(file_path) or os.path.getsize(file_path) < 1000: return None
     try:
         server_resp = requests.get("https://api.gofile.io/getServer").json()
         server = server_resp['data']['server']
@@ -99,9 +95,7 @@ def upload_to_gofile(file_path):
             resp = requests.post(f"https://{server}.gofile.io/uploadFile", files={"file": f}).json()
             if resp['status'] == 'ok': return resp['data']['downloadPage']
     except: pass
-    
     try:
-        # Fallback to Catbox
         with open(file_path, "rb") as f:
             resp = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f})
             if resp.status_code == 200: return resp.text.strip()
@@ -133,8 +127,8 @@ def main():
                 generate_audio(script, "voice.mp3")
                 download_images(title)
                 render_video("voice.mp3", OUTPUT_VIDEO)
-                
                 video_url = upload_to_gofile(OUTPUT_VIDEO)
+                
                 if video_url:
                     sheet.update_cell(row_num, 4, "Completed")
                     sheet.update_cell(row_num, 5, video_url)
@@ -145,7 +139,6 @@ def main():
                 sheet.update_cell(row_num, 4, f"Error: {str(e)[:30]}")
             
             finally:
-                # GUARANTEED CLEANUP: Runs even if the code crashes
                 if os.path.exists(DOWNLOAD_DIR):
                     for f in os.listdir(DOWNLOAD_DIR): 
                         try: os.remove(os.path.join(DOWNLOAD_DIR, f))
