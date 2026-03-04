@@ -10,7 +10,7 @@ from PIL import Image
 from gtts import gTTS
 from pydub import AudioSegment
 from pydub.effects import speedup
-from ddgs import DDGS 
+from duckduckgo_search import DDGS
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
