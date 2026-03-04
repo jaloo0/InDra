@@ -91,48 +91,40 @@ def render_video(audio_path, output_path):
     cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True)
 
-def upload_to_gofile(file_path):
-    print("☁️ Uploading to GoFile (with backup server logic)...")
+# --- GOOGLE DRIVE UPLOAD ---
+def upload_to_drive(file_path, title, creds):
+    """Uploads video to Google Drive using existing GCP creds + GDRIVE_FOLDER_ID."""
+    print("📤 Uploading to Google Drive...")
     try:
-        # 1. Get an available server
-        server_resp = requests.get("https://api.gofile.io/getServer").json()
-        
-        if server_resp['status'] == 'ok':
-            server = server_resp['data']['server']
-        else:
-            # Fallback: Pick the first server from the backup list if 'server' is empty
-            print("⚠️ Main server busy, trying backup zones...")
-            server = server_resp['data']['serversAllZone'][0]['name']
+        folder_id = os.environ['GDRIVE_FOLDER_ID']
+        drive_service = build('drive', 'v3', credentials=creds)
 
-        # 2. Upload the file
-        upload_url = f"https://{server}.gofile.io/uploadFile"
-        with open(file_path, "rb") as f:
-            response = requests.post(upload_url, files={"file": f}).json()
-        
-        if response['status'] == 'ok':
-            download_page = response['data']['downloadPage']
-            print(f"✅ GoFile Success: {download_page}")
-            return download_page
-            
+        file_metadata = {
+            'name': f"{title}.mp4",
+            'parents': [folder_id]
+        }
+        media = MediaFileUpload(file_path, mimetype='video/mp4', resumable=True)
+        uploaded = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+
+        file_id = uploaded.get('id')
+
+        # Make the file publicly viewable
+        drive_service.permissions().create(
+            fileId=file_id,
+            body={'type': 'anyone', 'role': 'reader'}
+        ).execute()
+
+        share_link = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
+        print(f"✅ Drive Upload Success: {share_link}")
+        return share_link
+
     except Exception as e:
-        print(f"⚠️ GoFile failed: {e}. Trying Backup: Catbox...")
-        
-    # --- BACKUP UPLOADER: Catbox.moe ---
-    try:
-        # Catbox is very reliable and requires no API key for small/medium files
-        catbox_url = "https://catbox.moe/user/api.php"
-        with open(file_path, "rb") as f:
-            data = {"reqtype": "fileupload"}
-            files = {"fileToUpload": f}
-            response = requests.post(catbox_url, data=data, files=files)
-        
-        if response.status_code == 200:
-            print(f"✅ Catbox Success: {response.text}")
-            return response.text
-    except Exception as e:
-        print(f"❌ All uploaders failed: {e}")
-        
-    return None
+        print(f"❌ Google Drive upload failed: {e}")
+        return None
 # --- MAIN AUTOMATION LOOP ---
 def main():
     # 1. Initialize Credentials
@@ -180,14 +172,14 @@ def main():
                 # 3. Assemble Video
                 render_video("voice.mp3", OUTPUT_VIDEO)
                 
-                # 4. Upload to GoFile (public link)
-                video_url = upload_to_gofile(OUTPUT_VIDEO)
+                # 4. Upload to Google Drive
+                video_url = upload_to_drive(OUTPUT_VIDEO, row['Title'], creds)
                 
                 if video_url:
                     # 5. Update Sheet
                     sheet.update_cell(row_num, 3, "Completed")
                     sheet.update_cell(row_num, 4, video_url)
-                    print(f"✅ Updated sheet with link: {video_url}")
+                    print(f"✅ Updated sheet with Drive link: {video_url}")
                 else:
                     sheet.update_cell(row_num, 3, "Upload Failed")
                 
