@@ -91,10 +91,32 @@ def render_video(audio_path, output_path):
     cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True)
 
-# --- FILE UPLOAD (GoFile primary + catbox fallback) ---
+# --- FILE UPLOAD (bashupload → GoFile → catbox) ---
 def upload_video_file(file_path):
-    """Uploads video to GoFile. Falls back to catbox.moe if that fails."""
-    # --- PRIMARY: GoFile ---
+    """Primary: bashupload.com | 2nd: GoFile | 3rd: catbox.moe"""
+
+    # --- PRIMARY: bashupload.com ---
+    print("📤 Uploading to bashupload.com...")
+    try:
+        filename = os.path.basename(file_path)
+        with open(file_path, "rb") as f:
+            response = requests.put(
+                f"https://bashupload.com/{filename}",
+                data=f,
+                timeout=300
+            )
+        if response.status_code == 200:
+            # Response text contains a line like: wget https://bashupload.com/XXXX/file.mp4
+            for line in response.text.strip().splitlines():
+                if "bashupload.com" in line:
+                    link = line.replace("wget ", "").strip()
+                    print(f"✅ bashupload Success: {link}")
+                    return link
+        print(f"⚠️ bashupload failed (HTTP {response.status_code}). Trying GoFile...")
+    except Exception as e:
+        print(f"⚠️ bashupload failed: {e}. Trying GoFile...")
+
+    # --- FALLBACK 1: GoFile ---
     print("☁️ Uploading to GoFile...")
     try:
         server_resp = requests.get("https://api.gofile.io/getServer", timeout=15).json()
@@ -116,7 +138,8 @@ def upload_video_file(file_path):
     except Exception as e:
         print(f"⚠️ GoFile failed: {e}. Trying catbox...")
 
-    # --- FALLBACK: catbox.moe ---
+    # --- FALLBACK 2: catbox.moe ---
+    print("📦 Uploading to catbox.moe...")
     try:
         with open(file_path, "rb") as f:
             response = requests.post(
