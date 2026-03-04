@@ -91,30 +91,34 @@ def render_video(audio_path, output_path):
     cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True)
 
-# --- FILE UPLOAD (0x0.st + catbox fallback) ---
+# --- FILE UPLOAD (GoFile primary + catbox fallback) ---
 def upload_video_file(file_path):
-    """Uploads video to 0x0.st. Falls back to catbox.moe if that fails."""
-    # --- PRIMARY: 0x0.st ---
-    print("📤 Uploading to 0x0.st...")
+    """Uploads video to GoFile. Falls back to catbox.moe if that fails."""
+    # --- PRIMARY: GoFile ---
+    print("☁️ Uploading to GoFile...")
     try:
-        with open(file_path, 'rb') as f:
-            response = requests.post(
-                "https://0x0.st",
-                files={"file": f},
-                timeout=300
-            )
-        if response.status_code == 200:
-            link = response.text.strip()
-            print(f"✅ 0x0.st Success: {link}")
+        server_resp = requests.get("https://api.gofile.io/getServer", timeout=15).json()
+        if server_resp['status'] == 'ok':
+            server = server_resp['data']['server']
+        else:
+            server = server_resp['data']['serversAllZone'][0]['name']
+
+        upload_url = f"https://{server}.gofile.io/uploadFile"
+        with open(file_path, "rb") as f:
+            response = requests.post(upload_url, files={"file": f}, timeout=300).json()
+
+        if response['status'] == 'ok':
+            link = response['data']['downloadPage']
+            print(f"✅ GoFile Success: {link}")
             return link
         else:
-            print(f"⚠️ 0x0.st failed: HTTP {response.status_code}. Trying catbox...")
+            print(f"⚠️ GoFile failed. Trying catbox...")
     except Exception as e:
-        print(f"⚠️ 0x0.st failed: {e}. Trying catbox...")
+        print(f"⚠️ GoFile failed: {e}. Trying catbox...")
 
     # --- FALLBACK: catbox.moe ---
     try:
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             response = requests.post(
                 "https://catbox.moe/user/api.php",
                 data={"reqtype": "fileupload"},
