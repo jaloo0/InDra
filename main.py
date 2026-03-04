@@ -91,69 +91,66 @@ def render_video(audio_path, output_path):
     cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True)
 
-# --- FILE UPLOAD (bashupload → GoFile → catbox) ---
+# --- FILE UPLOAD (pixeldrain → GoFile → litterbox) ---
 def upload_video_file(file_path):
-    """Primary: bashupload.com | 2nd: GoFile | 3rd: catbox.moe"""
+    """Primary: pixeldrain.com | 2nd: GoFile | 3rd: litterbox.catbox.moe"""
 
-    # --- PRIMARY: bashupload.com ---
-    print("📤 Uploading to bashupload.com...")
+    filename = os.path.basename(file_path)
+
+    # --- PRIMARY: pixeldrain.com ---
+    print("📤 Uploading to pixeldrain.com...")
     try:
-        filename = os.path.basename(file_path)
         with open(file_path, "rb") as f:
             response = requests.put(
-                f"https://bashupload.com/{filename}",
+                f"https://pixeldrain.com/api/file/{filename}",
                 data=f,
+                headers={"Content-Type": "video/mp4"},
                 timeout=300
             )
-        if response.status_code == 200:
-            # Response text contains a line like: wget https://bashupload.com/XXXX/file.mp4
-            for line in response.text.strip().splitlines():
-                if "bashupload.com" in line:
-                    link = line.replace("wget ", "").strip()
-                    print(f"✅ bashupload Success: {link}")
-                    return link
-        print(f"⚠️ bashupload failed (HTTP {response.status_code}). Trying GoFile...")
+        if response.status_code == 201:
+            file_id = response.json().get("id")
+            link = f"https://pixeldrain.com/u/{file_id}"
+            print(f"✅ Pixeldrain Success: {link}")
+            return link
+        else:
+            print(f"⚠️ Pixeldrain failed (HTTP {response.status_code}). Trying GoFile...")
     except Exception as e:
-        print(f"⚠️ bashupload failed: {e}. Trying GoFile...")
+        print(f"⚠️ Pixeldrain failed: {e}. Trying GoFile...")
 
-    # --- FALLBACK 1: GoFile ---
+    # --- FALLBACK 1: GoFile (updated API endpoint) ---
     print("☁️ Uploading to GoFile...")
     try:
-        server_resp = requests.get("https://api.gofile.io/getServer", timeout=15).json()
-        if server_resp['status'] == 'ok':
-            server = server_resp['data']['server']
-        else:
-            server = server_resp['data']['serversAllZone'][0]['name']
-
-        upload_url = f"https://{server}.gofile.io/uploadFile"
         with open(file_path, "rb") as f:
-            response = requests.post(upload_url, files={"file": f}, timeout=300).json()
-
-        if response['status'] == 'ok':
+            response = requests.post(
+                "https://store1.gofile.io/contents/uploadfile",
+                files={"file": (filename, f, "video/mp4")},
+                timeout=300
+            ).json()
+        if response.get('status') == 'ok':
             link = response['data']['downloadPage']
             print(f"✅ GoFile Success: {link}")
             return link
         else:
-            print(f"⚠️ GoFile failed. Trying catbox...")
+            print(f"⚠️ GoFile failed. Trying litterbox...")
     except Exception as e:
-        print(f"⚠️ GoFile failed: {e}. Trying catbox...")
+        print(f"⚠️ GoFile failed: {e}. Trying litterbox...")
 
-    # --- FALLBACK 2: catbox.moe ---
-    print("📦 Uploading to catbox.moe...")
+    # --- FALLBACK 2: litterbox.catbox.moe (72h expiry) ---
+    print("📦 Uploading to litterbox.catbox.moe...")
     try:
         with open(file_path, "rb") as f:
             response = requests.post(
-                "https://catbox.moe/user/api.php",
-                data={"reqtype": "fileupload"},
-                files={"fileToUpload": f},
+                "https://litterbox.catbox.moe/resources/internals/api.php",
+                data={"reqtype": "fileupload", "time": "72h"},
+                files={"fileToUpload": (filename, f, "video/mp4")},
                 timeout=300
             )
         if response.status_code == 200:
             link = response.text.strip()
-            print(f"✅ Catbox Success: {link}")
+            print(f"✅ Litterbox Success: {link}")
             return link
         else:
-            print(f"❌ Catbox failed: HTTP {response.status_code}")
+            print(f"❌ Litterbox failed: HTTP {response.status_code}")
     except Exception as e:
         print(f"❌ All uploaders failed: {e}")
 
