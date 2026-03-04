@@ -91,39 +91,28 @@ def render_video(audio_path, output_path):
     cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True)
 
-# --- GOOGLE DRIVE UPLOAD ---
-def upload_to_drive(file_path, title, creds):
-    """Uploads video to Google Drive using existing GCP creds + GDRIVE_FOLDER_ID."""
-    print("📤 Uploading to Google Drive...")
+# --- TRANSFER.SH UPLOAD ---
+def upload_to_transfer(file_path, title):
+    """Uploads video to transfer.sh — no auth needed, returns a public link."""
+    print("📤 Uploading to transfer.sh...")
     try:
-        folder_id = os.environ['GDRIVE_FOLDER_ID']
-        drive_service = build('drive', 'v3', credentials=creds)
-
-        file_metadata = {
-            'name': f"{title}.mp4",
-            'parents': [folder_id]
-        }
-        media = MediaFileUpload(file_path, mimetype='video/mp4', resumable=True)
-        uploaded = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id'
-        ).execute()
-
-        file_id = uploaded.get('id')
-
-        # Make the file publicly viewable
-        drive_service.permissions().create(
-            fileId=file_id,
-            body={'type': 'anyone', 'role': 'reader'}
-        ).execute()
-
-        share_link = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
-        print(f"✅ Drive Upload Success: {share_link}")
-        return share_link
-
+        filename = f"{title}.mp4".replace(' ', '_')
+        with open(file_path, 'rb') as f:
+            response = requests.put(
+                f"https://transfer.sh/{filename}",
+                data=f,
+                headers={'Max-Days': '7'},
+                timeout=300
+            )
+        if response.status_code == 200:
+            link = response.text.strip()
+            print(f"✅ transfer.sh Success: {link}")
+            return link
+        else:
+            print(f"❌ transfer.sh failed: HTTP {response.status_code}")
+            return None
     except Exception as e:
-        print(f"❌ Google Drive upload failed: {e}")
+        print(f"❌ transfer.sh upload failed: {e}")
         return None
 # --- MAIN AUTOMATION LOOP ---
 def main():
@@ -172,8 +161,8 @@ def main():
                 # 3. Assemble Video
                 render_video("voice.mp3", OUTPUT_VIDEO)
                 
-                # 4. Upload to Google Drive
-                video_url = upload_to_drive(OUTPUT_VIDEO, row['Title'], creds)
+                # 4. Upload to transfer.sh
+                video_url = upload_to_transfer(OUTPUT_VIDEO, row['Title'])
                 
                 if video_url:
                     # 5. Update Sheet
