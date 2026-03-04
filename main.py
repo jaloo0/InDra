@@ -91,29 +91,46 @@ def render_video(audio_path, output_path):
     cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True)
 
-# --- TRANSFER.SH UPLOAD ---
-def upload_to_transfer(file_path, title):
-    """Uploads video to transfer.sh — no auth needed, returns a public link."""
-    print("📤 Uploading to transfer.sh...")
+# --- FILE UPLOAD (0x0.st + catbox fallback) ---
+def upload_video_file(file_path):
+    """Uploads video to 0x0.st. Falls back to catbox.moe if that fails."""
+    # --- PRIMARY: 0x0.st ---
+    print("📤 Uploading to 0x0.st...")
     try:
-        filename = f"{title}.mp4".replace(' ', '_')
         with open(file_path, 'rb') as f:
-            response = requests.put(
-                f"https://transfer.sh/{filename}",
-                data=f,
-                headers={'Max-Days': '7'},
+            response = requests.post(
+                "https://0x0.st",
+                files={"file": f},
                 timeout=300
             )
         if response.status_code == 200:
             link = response.text.strip()
-            print(f"✅ transfer.sh Success: {link}")
+            print(f"✅ 0x0.st Success: {link}")
             return link
         else:
-            print(f"❌ transfer.sh failed: HTTP {response.status_code}")
-            return None
+            print(f"⚠️ 0x0.st failed: HTTP {response.status_code}. Trying catbox...")
     except Exception as e:
-        print(f"❌ transfer.sh upload failed: {e}")
-        return None
+        print(f"⚠️ 0x0.st failed: {e}. Trying catbox...")
+
+    # --- FALLBACK: catbox.moe ---
+    try:
+        with open(file_path, 'rb') as f:
+            response = requests.post(
+                "https://catbox.moe/user/api.php",
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": f},
+                timeout=300
+            )
+        if response.status_code == 200:
+            link = response.text.strip()
+            print(f"✅ Catbox Success: {link}")
+            return link
+        else:
+            print(f"❌ Catbox failed: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"❌ All uploaders failed: {e}")
+
+    return None
 # --- MAIN AUTOMATION LOOP ---
 def main():
     # 1. Initialize Credentials
@@ -161,8 +178,8 @@ def main():
                 # 3. Assemble Video
                 render_video("voice.mp3", OUTPUT_VIDEO)
                 
-                # 4. Upload to transfer.sh
-                video_url = upload_to_transfer(OUTPUT_VIDEO, row['Title'])
+                # 4. Upload video (0x0.st → catbox fallback)
+                video_url = upload_video_file(OUTPUT_VIDEO)
                 
                 if video_url:
                     # 5. Update Sheet
