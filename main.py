@@ -176,52 +176,52 @@ def get_youtube_info(url):
     except Exception as e:
         print(f"⚠️ Could not get YouTube title: {e}")
 
-    # Transcript via youtube_transcript_api
+    # --- BYPASS YOUTUBE BOT BLOCK via COBALT.TOOLS -> WHISPER ---
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-        try:
-            # Attempt 1: Try specifically for Hindi, Urdu, or English (and variants)
-            entries = YouTubeTranscriptApi.get_transcript(video_id, languages=['hi', 'ur', 'en', 'hi-IN', 'en-IN'])
-        except:
-            # Attempt 2: If the specific languages fail, just grab whatever the default/only transcript is
-            entries = YouTubeTranscriptApi.get_transcript(video_id)
-            
-        script = ' '.join([t['text'] for t in entries])
-        print(f"✅ Transcript fetched ({len(script)} chars)")
+        import whisper
+        import time
+
+        print("⏳ Bypassing YouTube block... downloading audio via Cobalt.tools API...")
         
+        # Request audio extraction from Cobalt
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "url": url,
+            "isAudioOnly": True,
+            "aFormat": "mp3"
+        }
+        
+        cobalt_resp = requests.post("https://api.cobalt.tools/api/json", json=payload, headers=headers, timeout=30).json()
+        
+        if cobalt_resp.get("status") in ["stream", "redirect"]:
+            audio_url = cobalt_resp.get("url")
+            
+            # Download the mp3 file
+            r = requests.get(audio_url, allow_redirects=True, timeout=60)
+            if r.status_code == 200:
+                with open("whisper_temp.mp3", "wb") as f:
+                    f.write(r.content)
+                
+                print("🧠 Transcribing downloaded audio with Whisper (tiny model)...")
+                model = whisper.load_model("tiny")
+                result = model.transcribe("whisper_temp.mp3")
+                script = result["text"]
+                print(f"✅ Whisper Transcript generated ({len(script)} chars)")
+                
+                if os.path.exists("whisper_temp.mp3"):
+                    os.remove("whisper_temp.mp3")
+                    
+                return title, script
+            else:
+                print(f"❌ Failed to download audio from Cobalt (HTTP {r.status_code})")
+        else:
+            print(f"❌ Cobalt could not process URL: {cobalt_resp}")
+            
     except Exception as e:
-        print(f"⚠️ YouTube transcript failed ({e}). Falling back to Whisper AI...")
-        
-        # --- WHISPER AI FALLBACK ---
-        try:
-            import whisper
-            import yt_dlp
-            
-            print("⏳ Downloading audio via yt-dlp for Whisper...")
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': 'whisper_temp.%(ext)s',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '128',
-                }],
-                'quiet': True
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-                
-            print("🧠 Transcribing audio with Whisper (tiny model - perfectly free & fast)...")
-            model = whisper.load_model("tiny")
-            result = model.transcribe("whisper_temp.mp3")
-            script = result["text"]
-            print(f"✅ Whisper Transcript generated ({len(script)} chars)")
-            
-            if os.path.exists("whisper_temp.mp3"):
-                os.remove("whisper_temp.mp3")
-                
-        except Exception as whisper_err:
-            print(f"❌ Whisper fallback also failed: {whisper_err}")
+        print(f"❌ Ultimate fallback (Cobalt+Whisper) failed: {e}")
 
     return title, script
 
