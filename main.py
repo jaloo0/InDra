@@ -156,138 +156,66 @@ def upload_video_file(file_path):
 
 # --- YOUTUBE INFO EXTRACTOR ---
 def get_youtube_info(url):
-    """Fetches title (oEmbed) and transcript (youtube_transcript_api) from a YT URL."""
-    match = re.search(r'(?:v=|youtu\.be/|/v/|/embed/)([A-Za-z0-9_-]{11})', url)
-    if not match:
-        print(f"❌ Could not extract video ID from URL: {url}")
-        return None, None
-    video_id = match.group(1)
-    title, script = None, None
+    """Fetches title and transcript via yt-dlp (client impersonation bypasses bot blocks)."""
+    import yt_dlp
 
-    # Title via YouTube oEmbed — no API key needed
-    try:
-        resp = requests.get(
-            f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json",
-            timeout=10
-        )
-        if resp.status_code == 200:
-            title = resp.json().get('title', '')
-            print(f"📺 YouTube Title: {title}")
-    except Exception as e:
-        print(f"⚠️ Could not get YouTube title: {e}")
+    print(f"🔗 Fetching info via yt-dlp...")
 
-    BROWSER_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True,
+        'writesubtitles': True,
+        'writeautomaticsub': True,
+        'subtitlesformat': 'json3',
     }
 
-    # --- TIER 1: youtube-transcript-api (fastest, no proxy needed) ---
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-        api = YouTubeTranscriptApi()  # v1.0+ uses instance, not static
-        try:
-            fetched = api.fetch(video_id, languages=['hi', 'ur', 'en', 'hi-IN', 'en-IN'])
-        except Exception:
-            fetched = api.fetch(video_id)  # fallback: grab whatever is available
-        script = ' '.join([t.text for t in fetched])
-        print(f"✅ Transcript via youtube-transcript-api ({len(script)} chars)")
-        return title, script
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            title = info.get('title', '')
+            print(f"📺 YouTube Title: {title}")
+
+            subs = info.get('subtitles') or {}
+            auto_subs = info.get('automatic_captions') or {}
+            all_subs = {**auto_subs, **subs}  # manual subs override auto
+
+            if not all_subs:
+                print("❌ No subtitles/captions found on this video.")
+                return title, None
+
+            # Try preferred languages, then fall back to first available
+            preferred = ['hi', 'ur', 'en', 'hi-IN', 'en-IN']
+            lang_to_use = next((l for l in preferred if l in all_subs), None)
+            if not lang_to_use:
+                lang_to_use = next(iter(all_subs))
+
+            # Get the json3 format URL
+            fmt = next((f for f in all_subs[lang_to_use] if f.get('ext') == 'json3'), None)
+            if not fmt:
+                fmt = all_subs[lang_to_use][0]  # take any format available
+
+            sub_url = fmt['url']
+            resp = requests.get(sub_url, timeout=20)
+            if resp.status_code != 200:
+                print(f"❌ Could not download subtitle file (HTTP {resp.status_code})")
+                return title, None
+
+            # Parse json3 format
+            data = resp.json()
+            lines = []
+            for event in data.get('events', []):
+                for seg in event.get('segs', []):
+                    text = seg.get('utf8', '').strip()
+                    if text and text != '\n':
+                        lines.append(text)
+
+            script = re.sub(r' +', ' ', ' '.join(lines))
+            print(f"✅ Transcript via yt-dlp [Lang: {lang_to_use}] ({len(script)} chars)")
+            return title, script
+
     except Exception as e:
-        print(f"⚠️ youtube-transcript-api failed: {e}")
-
-    # --- TIER 2: Invidious public instances with browser headers (bypasses bot block) ---
-    INVIDIOUS_INSTANCES = [
-        "https://yewtu.be",
-        "https://invidious.kavin.rocks",
-        "https://inv.nadeko.net",
-        "https://invidious.io.lol",
-        "https://iv.melmac.space",
-        "https://invidious.lunar.icu",
-        "https://vid.puffyan.us",
-    ]
-
-    for instance in INVIDIOUS_INSTANCES:
-        try:
-            print(f"📡 Trying {instance}...")
-            captions_resp = requests.get(
-                f"{instance}/api/v1/captions/{video_id}",
-                headers=BROWSER_HEADERS,
-                timeout=15
-            )
-            if captions_resp.status_code != 200:
-                print(f"   ↳ HTTP {captions_resp.status_code}, skipping.")
-                continue
-
-            tracks = captions_resp.json()
-            if not tracks:
-                print(f"   ↳ No caption tracks found, skipping.")
-                continue
-
-            chosen = None
-            for lang_prefix in ['hi', 'ur', 'en']:
-                chosen = next((t for t in tracks if t.get('languageCode', '').startswith(lang_prefix)), None)
-                if chosen:
-                    break
-            if not chosen:
-                chosen = tracks[0]
-
-            cap_url = chosen['url']
-            if cap_url.startswith('/'):
-                cap_url = instance + cap_url
-            vtt_resp = requests.get(cap_url, headers=BROWSER_HEADERS, timeout=15)
-            if vtt_resp.status_code != 200:
-                print(f"   ↳ Caption file HTTP {vtt_resp.status_code}, skipping.")
-                continue
-
-            text_lines = []
-            for line in vtt_resp.text.splitlines():
-                line = line.strip()
-                if not line or line.startswith('WEBVTT') or '-->' in line or line.isdigit():
-                    continue
-                clean = re.sub(r'<[^>]+>', '', line)
-                if clean:
-                    text_lines.append(clean)
-
-            script = ' '.join(text_lines)
-            print(f"✅ Captions via Invidious [Lang: {chosen.get('languageCode','?')}] ({len(script)} chars)")
-            break
-
-        except Exception as e:
-            print(f"   ↳ Error: {e}")
-            continue
-
-    # --- TIER 3: YouTube timedtext API (last resort) ---
-    if not script:
-        print("⚠️ Invidious failed. Trying YouTube timedtext directly...")
-        for lang in ['hi', 'en']:
-            try:
-                tt_resp = requests.get(
-                    f"https://www.youtube.com/api/timedtext?lang={lang}&v={video_id}&fmt=vtt",
-                    headers=BROWSER_HEADERS,
-                    timeout=15
-                )
-                if tt_resp.status_code == 200 and tt_resp.text.strip():
-                    text_lines = []
-                    for line in tt_resp.text.splitlines():
-                        line = line.strip()
-                        if not line or line.startswith('WEBVTT') or '-->' in line or line.isdigit():
-                            continue
-                        clean = re.sub(r'<[^>]+>', '', line)
-                        if clean:
-                            text_lines.append(clean)
-                    if text_lines:
-                        script = ' '.join(text_lines)
-                        print(f"✅ YouTube timedtext [{lang}] ({len(script)} chars)")
-                        break
-                else:
-                    print(f"   ↳ timedtext [{lang}]: HTTP {tt_resp.status_code}, empty={not tt_resp.text.strip()}")
-            except Exception as e:
-                print(f"   ↳ timedtext [{lang}] failed: {e}")
-
-    if not script:
-        print("❌ All caption sources exhausted. No transcript available.")
-
-    return title, script
+        print(f"⚠️ yt-dlp failed: {e}")
+        return None, None
 
 # --- MAIN AUTOMATION LOOP ---
 def main():
