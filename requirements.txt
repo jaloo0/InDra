@@ -8,3 +8,5 @@ pydub
 Pillow
 duckduckgo_search
 youtube-transcript-api
+yt-dlp
+openai-whisper
