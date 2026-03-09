@@ -176,28 +176,28 @@ def get_youtube_info(url):
     except Exception as e:
         print(f"⚠️ Could not get YouTube title: {e}")
 
-    # --- BYPASS YOUTUBE BOT BLOCK via COBALT.TOOLS -> WHISPER ---
+    # --- BYPASS YOUTUBE BOT BLOCK via COBALT.TOOLS (v8 API) -> WHISPER ---
     try:
         import whisper
         import time
 
         print("⏳ Bypassing YouTube block... downloading audio via Cobalt.tools API...")
         
-        # Request audio extraction from Cobalt
+        # Request audio extraction from Cobalt v8 API
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json"
         }
         payload = {
             "url": url,
-            "isAudioOnly": True,
-            "aFormat": "mp3"
+            "downloadMode": "audio",
+            "audioFormat": "mp3"
         }
         
-        cobalt_resp = requests.post("https://api.cobalt.tools/api/json", json=payload, headers=headers, timeout=30).json()
+        cobalt_resp = requests.post("https://api.cobalt.tools/", json=payload, headers=headers, timeout=30).json()
         
-        if cobalt_resp.get("status") in ["stream", "redirect"]:
-            audio_url = cobalt_resp.get("url")
+        if "url" in cobalt_resp:
+            audio_url = cobalt_resp["url"]
             
             # Download the mp3 file
             r = requests.get(audio_url, allow_redirects=True, timeout=60)
