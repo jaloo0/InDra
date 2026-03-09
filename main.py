@@ -177,29 +177,30 @@ def get_youtube_info(url):
         print(f"⚠️ Could not get YouTube title: {e}")
 
     # --- BYPASS YOUTUBE BOT BLOCK via PUBLIC INVIDIOUS INSTANCES ---
-    # Invidious is an open-source YouTube proxy. Its public API returns captions
-    # without any authentication, bypassing GitHub runner IP blocks entirely.
     INVIDIOUS_INSTANCES = [
-        "https://invidious.io.lol",
+        "https://yewtu.be",
+        "https://invidious.kavin.rocks",
         "https://inv.nadeko.net",
-        "https://invidious.privacydev.net",
-        "https://yt.artemislena.eu",
-        "https://invidious.nerdvpn.de",
+        "https://invidious.io.lol",
+        "https://iv.melmac.space",
+        "https://invidious.lunar.icu",
+        "https://vid.puffyan.us",
     ]
 
     for instance in INVIDIOUS_INSTANCES:
         try:
-            print(f"📡 Fetching captions via {instance}...")
+            print(f"📡 Trying {instance}...")
             captions_resp = requests.get(
                 f"{instance}/api/v1/captions/{video_id}",
                 timeout=15
             )
             if captions_resp.status_code != 200:
+                print(f"   ↳ HTTP {captions_resp.status_code}, skipping.")
                 continue
 
             tracks = captions_resp.json()
             if not tracks:
-                print(f"⚠️ No caption tracks found on {instance}.")
+                print(f"   ↳ No caption tracks found, skipping.")
                 continue
 
             # Prefer Hindi/Urdu/English, else take whatever is first
@@ -217,9 +218,10 @@ def get_youtube_info(url):
                 cap_url = instance + cap_url
             vtt_resp = requests.get(cap_url, timeout=15)
             if vtt_resp.status_code != 200:
+                print(f"   ↳ Caption file HTTP {vtt_resp.status_code}, skipping.")
                 continue
 
-            # Parse VTT — remove timestamps and tags, keep only text lines
+            # Parse VTT — remove timestamps, keep only text lines
             text_lines = []
             for line in vtt_resp.text.splitlines():
                 line = line.strip()
@@ -230,15 +232,41 @@ def get_youtube_info(url):
                     text_lines.append(clean)
 
             script = ' '.join(text_lines)
-            print(f"✅ Captions fetched via {instance} [Lang: {chosen.get('languageCode','?')}] ({len(script)} chars)")
+            print(f"✅ Captions fetched [Lang: {chosen.get('languageCode','?')}] ({len(script)} chars)")
             break
 
         except Exception as e:
-            print(f"⚠️ {instance} failed: {e}")
+            print(f"   ↳ Error: {e}")
             continue
 
+    # --- LAST RESORT: YouTube's own timedtext endpoint ---
     if not script:
-        print("❌ All Invidious instances failed to return captions.")
+        print("⚠️ All Invidious failed. Trying YouTube timedtext API directly...")
+        for lang in ['hi', 'en']:
+            try:
+                tt_resp = requests.get(
+                    f"https://www.youtube.com/api/timedtext?lang={lang}&v={video_id}&fmt=vtt",
+                    timeout=15,
+                    headers={"User-Agent": "Mozilla/5.0"}
+                )
+                if tt_resp.status_code == 200 and tt_resp.text.strip():
+                    text_lines = []
+                    for line in tt_resp.text.splitlines():
+                        line = line.strip()
+                        if not line or line.startswith('WEBVTT') or '-->' in line or line.isdigit():
+                            continue
+                        clean = re.sub(r'<[^>]+>', '', line)
+                        if clean:
+                            text_lines.append(clean)
+                    if text_lines:
+                        script = ' '.join(text_lines)
+                        print(f"✅ YouTube timedtext success [lang={lang}] ({len(script)} chars)")
+                        break
+            except Exception as e:
+                print(f"   ↳ timedtext [{lang}] failed: {e}")
+
+    if not script:
+        print("❌ All caption sources exhausted. No transcript available.")
 
     return title, script
 
