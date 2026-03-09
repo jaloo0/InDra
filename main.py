@@ -154,7 +154,39 @@ def upload_video_file(file_path):
     except Exception as e:
         print(f"❌ All uploaders failed: {e}")
 
-    return None
+# --- YOUTUBE INFO EXTRACTOR ---
+def get_youtube_info(url):
+    """Fetches title (oEmbed) and transcript (youtube_transcript_api) from a YT URL."""
+    match = re.search(r'(?:v=|youtu\.be/|/v/|/embed/)([A-Za-z0-9_-]{11})', url)
+    if not match:
+        print(f"❌ Could not extract video ID from URL: {url}")
+        return None, None
+    video_id = match.group(1)
+    title, script = None, None
+
+    # Title via YouTube oEmbed — no API key needed
+    try:
+        resp = requests.get(
+            f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json",
+            timeout=10
+        )
+        if resp.status_code == 200:
+            title = resp.json().get('title', '')
+            print(f"📺 YouTube Title: {title}")
+    except Exception as e:
+        print(f"⚠️ Could not get YouTube title: {e}")
+
+    # Transcript via youtube_transcript_api
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        entries = YouTubeTranscriptApi.get_transcript(video_id, languages=['hi', 'ur', 'en'])
+        script = ' '.join([t['text'] for t in entries])
+        print(f"✅ Transcript fetched ({len(script)} chars)")
+    except Exception as e:
+        print(f"⚠️ Could not get transcript: {e}")
+
+    return title, script
+
 # --- MAIN AUTOMATION LOOP ---
 def main():
     # 1. Initialize Credentials
@@ -189,15 +221,34 @@ def main():
         # Process rows with empty status OR "Pending" status
         status = row.get('Status', '').strip()
         if status == '' or status == 'Pending':
-            print(f"\n🚀 Processing: {row['Title']}")
             try:
-                sheet.update_cell(row_num, 3, "Processing")
-                
+                sheet.update_cell(row_num, 4, "Processing")
+
+                # --- Resolve Title & Script (Sheet OR YouTube link) ---
+                yt_link = row.get('yt link', '').strip()
+                title  = row.get('Title', '').strip()
+                script = row.get('Script', '').strip()
+
+                if yt_link:
+                    print(f"🔗 YouTube link found — fetching title & transcript...")
+                    yt_title, yt_script = get_youtube_info(yt_link)
+                    if yt_title:
+                        title = yt_title
+                    if yt_script:
+                        script = yt_script
+
+                print(f"\n🚀 Processing: {title or yt_link or '(no title)'}")
+
+                if not script:
+                    print(f"❌ No script available (no Script text and no transcript). Skipping.")
+                    sheet.update_cell(row_num, 4, "No Script")
+                    continue
+
                 # 1. Voice from Script
-                generate_audio(row['Script'], "voice.mp3")
+                generate_audio(script, "voice.mp3")
                 
                 # 2. Images from Title
-                download_images(row['Title'])
+                download_images(title)
                 
                 # 3. Assemble Video
                 render_video("voice.mp3", OUTPUT_VIDEO)
@@ -207,11 +258,11 @@ def main():
                 
                 if video_url:
                     # 5. Update Sheet
-                    sheet.update_cell(row_num, 3, "Completed")
-                    sheet.update_cell(row_num, 4, video_url)
+                    sheet.update_cell(row_num, 4, "Completed")
+                    sheet.update_cell(row_num, 6, video_url)
                     print(f"✅ Updated sheet with Drive link: {video_url}")
                 else:
-                    sheet.update_cell(row_num, 3, "Upload Failed")
+                    sheet.update_cell(row_num, 4, "Upload Failed")
                 
                 # Cleanup for next loop
                 if os.path.exists(DOWNLOAD_DIR):
@@ -228,7 +279,7 @@ def main():
                 error_msg = traceback.format_exc()
                 print(f"❌ Failed processing '{row['Title']}':")
                 print(error_msg)
-                sheet.update_cell(row_num, 3, f"Error: {str(e)[:50]}")
+                sheet.update_cell(row_num, 4, f"Error: {str(e)[:50]}")
 
 if __name__ == "__main__":
     main()
