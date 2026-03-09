@@ -176,7 +176,26 @@ def get_youtube_info(url):
     except Exception as e:
         print(f"⚠️ Could not get YouTube title: {e}")
 
-    # --- BYPASS YOUTUBE BOT BLOCK via PUBLIC INVIDIOUS INSTANCES ---
+    BROWSER_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    # --- TIER 1: youtube-transcript-api (fastest, no proxy needed) ---
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        api = YouTubeTranscriptApi()  # v1.0+ uses instance, not static
+        try:
+            fetched = api.fetch(video_id, languages=['hi', 'ur', 'en', 'hi-IN', 'en-IN'])
+        except Exception:
+            fetched = api.fetch(video_id)  # fallback: grab whatever is available
+        script = ' '.join([t.text for t in fetched])
+        print(f"✅ Transcript via youtube-transcript-api ({len(script)} chars)")
+        return title, script
+    except Exception as e:
+        print(f"⚠️ youtube-transcript-api failed: {e}")
+
+    # --- TIER 2: Invidious public instances with browser headers (bypasses bot block) ---
     INVIDIOUS_INSTANCES = [
         "https://yewtu.be",
         "https://invidious.kavin.rocks",
@@ -192,6 +211,7 @@ def get_youtube_info(url):
             print(f"📡 Trying {instance}...")
             captions_resp = requests.get(
                 f"{instance}/api/v1/captions/{video_id}",
+                headers=BROWSER_HEADERS,
                 timeout=15
             )
             if captions_resp.status_code != 200:
@@ -203,7 +223,6 @@ def get_youtube_info(url):
                 print(f"   ↳ No caption tracks found, skipping.")
                 continue
 
-            # Prefer Hindi/Urdu/English, else take whatever is first
             chosen = None
             for lang_prefix in ['hi', 'ur', 'en']:
                 chosen = next((t for t in tracks if t.get('languageCode', '').startswith(lang_prefix)), None)
@@ -212,16 +231,14 @@ def get_youtube_info(url):
             if not chosen:
                 chosen = tracks[0]
 
-            # Fetch the VTT caption file
             cap_url = chosen['url']
             if cap_url.startswith('/'):
                 cap_url = instance + cap_url
-            vtt_resp = requests.get(cap_url, timeout=15)
+            vtt_resp = requests.get(cap_url, headers=BROWSER_HEADERS, timeout=15)
             if vtt_resp.status_code != 200:
                 print(f"   ↳ Caption file HTTP {vtt_resp.status_code}, skipping.")
                 continue
 
-            # Parse VTT — remove timestamps, keep only text lines
             text_lines = []
             for line in vtt_resp.text.splitlines():
                 line = line.strip()
@@ -232,22 +249,22 @@ def get_youtube_info(url):
                     text_lines.append(clean)
 
             script = ' '.join(text_lines)
-            print(f"✅ Captions fetched [Lang: {chosen.get('languageCode','?')}] ({len(script)} chars)")
+            print(f"✅ Captions via Invidious [Lang: {chosen.get('languageCode','?')}] ({len(script)} chars)")
             break
 
         except Exception as e:
             print(f"   ↳ Error: {e}")
             continue
 
-    # --- LAST RESORT: YouTube's own timedtext endpoint ---
+    # --- TIER 3: YouTube timedtext API (last resort) ---
     if not script:
-        print("⚠️ All Invidious failed. Trying YouTube timedtext API directly...")
+        print("⚠️ Invidious failed. Trying YouTube timedtext directly...")
         for lang in ['hi', 'en']:
             try:
                 tt_resp = requests.get(
                     f"https://www.youtube.com/api/timedtext?lang={lang}&v={video_id}&fmt=vtt",
-                    timeout=15,
-                    headers={"User-Agent": "Mozilla/5.0"}
+                    headers=BROWSER_HEADERS,
+                    timeout=15
                 )
                 if tt_resp.status_code == 200 and tt_resp.text.strip():
                     text_lines = []
@@ -260,8 +277,10 @@ def get_youtube_info(url):
                             text_lines.append(clean)
                     if text_lines:
                         script = ' '.join(text_lines)
-                        print(f"✅ YouTube timedtext success [lang={lang}] ({len(script)} chars)")
+                        print(f"✅ YouTube timedtext [{lang}] ({len(script)} chars)")
                         break
+                else:
+                    print(f"   ↳ timedtext [{lang}]: HTTP {tt_resp.status_code}, empty={not tt_resp.text.strip()}")
             except Exception as e:
                 print(f"   ↳ timedtext [{lang}] failed: {e}")
 
