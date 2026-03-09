@@ -179,9 +179,24 @@ def get_youtube_info(url):
     # Transcript via youtube_transcript_api
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        entries = YouTubeTranscriptApi.get_transcript(video_id, languages=['hi', 'ur', 'en'])
-        script = ' '.join([t['text'] for t in entries])
-        print(f"✅ Transcript fetched ({len(script)} chars)")
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        
+        target_transcript = None
+        try:
+            # Try preferred languages, including auto-generated Hindi ('a.hi' or just relying on fallback)
+            target_transcript = transcript_list.find_transcript(['hi', 'ur', 'en', 'en-IN'])
+        except:
+            # If preferred not found, just take the very first available transcript
+            transcripts = list(transcript_list)
+            if transcripts:
+                target_transcript = transcripts[0]
+                
+        if target_transcript:
+            entries = target_transcript.fetch()
+            script = ' '.join([t['text'] for t in entries])
+            print(f"✅ Transcript fetched ({len(script)} chars) [Lang: {target_transcript.language_code}]")
+        else:
+            print("⚠️ No transcripts found on this video.")
     except Exception as e:
         print(f"⚠️ Could not get transcript: {e}")
 
