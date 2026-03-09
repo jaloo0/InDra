@@ -179,26 +179,49 @@ def get_youtube_info(url):
     # Transcript via youtube_transcript_api
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        
-        target_transcript = None
         try:
-            # Try preferred languages, including auto-generated Hindi ('a.hi' or just relying on fallback)
-            target_transcript = transcript_list.find_transcript(['hi', 'ur', 'en', 'en-IN'])
+            # Attempt 1: Try specifically for Hindi, Urdu, or English (and variants)
+            entries = YouTubeTranscriptApi.get_transcript(video_id, languages=['hi', 'ur', 'en', 'hi-IN', 'en-IN'])
         except:
-            # If preferred not found, just take the very first available transcript
-            transcripts = list(transcript_list)
-            if transcripts:
-                target_transcript = transcripts[0]
-                
-        if target_transcript:
-            entries = target_transcript.fetch()
-            script = ' '.join([t['text'] for t in entries])
-            print(f"✅ Transcript fetched ({len(script)} chars) [Lang: {target_transcript.language_code}]")
-        else:
-            print("⚠️ No transcripts found on this video.")
+            # Attempt 2: If the specific languages fail, just grab whatever the default/only transcript is
+            entries = YouTubeTranscriptApi.get_transcript(video_id)
+            
+        script = ' '.join([t['text'] for t in entries])
+        print(f"✅ Transcript fetched ({len(script)} chars)")
+        
     except Exception as e:
-        print(f"⚠️ Could not get transcript: {e}")
+        print(f"⚠️ YouTube transcript failed ({e}). Falling back to Whisper AI...")
+        
+        # --- WHISPER AI FALLBACK ---
+        try:
+            import whisper
+            import yt_dlp
+            
+            print("⏳ Downloading audio via yt-dlp for Whisper...")
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': 'whisper_temp.%(ext)s',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '128',
+                }],
+                'quiet': True
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+                
+            print("🧠 Transcribing audio with Whisper (tiny model - perfectly free & fast)...")
+            model = whisper.load_model("tiny")
+            result = model.transcribe("whisper_temp.mp3")
+            script = result["text"]
+            print(f"✅ Whisper Transcript generated ({len(script)} chars)")
+            
+            if os.path.exists("whisper_temp.mp3"):
+                os.remove("whisper_temp.mp3")
+                
+        except Exception as whisper_err:
+            print(f"❌ Whisper fallback also failed: {whisper_err}")
 
     return title, script
 
