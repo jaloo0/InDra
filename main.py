@@ -176,52 +176,69 @@ def get_youtube_info(url):
     except Exception as e:
         print(f"⚠️ Could not get YouTube title: {e}")
 
-    # --- BYPASS YOUTUBE BOT BLOCK via COBALT.TOOLS (v8 API) -> WHISPER ---
-    try:
-        import whisper
-        import time
+    # --- BYPASS YOUTUBE BOT BLOCK via PUBLIC INVIDIOUS INSTANCES ---
+    # Invidious is an open-source YouTube proxy. Its public API returns captions
+    # without any authentication, bypassing GitHub runner IP blocks entirely.
+    INVIDIOUS_INSTANCES = [
+        "https://invidious.io.lol",
+        "https://inv.nadeko.net",
+        "https://invidious.privacydev.net",
+        "https://yt.artemislena.eu",
+        "https://invidious.nerdvpn.de",
+    ]
 
-        print("⏳ Bypassing YouTube block... downloading audio via Cobalt.tools API...")
-        
-        # Request audio extraction from Cobalt v8 API
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "url": url,
-            "downloadMode": "audio",
-            "audioFormat": "mp3"
-        }
-        
-        cobalt_resp = requests.post("https://api.cobalt.tools/", json=payload, headers=headers, timeout=30).json()
-        
-        if "url" in cobalt_resp:
-            audio_url = cobalt_resp["url"]
-            
-            # Download the mp3 file
-            r = requests.get(audio_url, allow_redirects=True, timeout=60)
-            if r.status_code == 200:
-                with open("whisper_temp.mp3", "wb") as f:
-                    f.write(r.content)
-                
-                print("🧠 Transcribing downloaded audio with Whisper (tiny model)...")
-                model = whisper.load_model("tiny")
-                result = model.transcribe("whisper_temp.mp3")
-                script = result["text"]
-                print(f"✅ Whisper Transcript generated ({len(script)} chars)")
-                
-                if os.path.exists("whisper_temp.mp3"):
-                    os.remove("whisper_temp.mp3")
-                    
-                return title, script
-            else:
-                print(f"❌ Failed to download audio from Cobalt (HTTP {r.status_code})")
-        else:
-            print(f"❌ Cobalt could not process URL: {cobalt_resp}")
-            
-    except Exception as e:
-        print(f"❌ Ultimate fallback (Cobalt+Whisper) failed: {e}")
+    for instance in INVIDIOUS_INSTANCES:
+        try:
+            print(f"📡 Fetching captions via {instance}...")
+            captions_resp = requests.get(
+                f"{instance}/api/v1/captions/{video_id}",
+                timeout=15
+            )
+            if captions_resp.status_code != 200:
+                continue
+
+            tracks = captions_resp.json()
+            if not tracks:
+                print(f"⚠️ No caption tracks found on {instance}.")
+                continue
+
+            # Prefer Hindi/Urdu/English, else take whatever is first
+            chosen = None
+            for lang_prefix in ['hi', 'ur', 'en']:
+                chosen = next((t for t in tracks if t.get('languageCode', '').startswith(lang_prefix)), None)
+                if chosen:
+                    break
+            if not chosen:
+                chosen = tracks[0]
+
+            # Fetch the VTT caption file
+            cap_url = chosen['url']
+            if cap_url.startswith('/'):
+                cap_url = instance + cap_url
+            vtt_resp = requests.get(cap_url, timeout=15)
+            if vtt_resp.status_code != 200:
+                continue
+
+            # Parse VTT — remove timestamps and tags, keep only text lines
+            text_lines = []
+            for line in vtt_resp.text.splitlines():
+                line = line.strip()
+                if not line or line.startswith('WEBVTT') or '-->' in line or line.isdigit():
+                    continue
+                clean = re.sub(r'<[^>]+>', '', line)
+                if clean:
+                    text_lines.append(clean)
+
+            script = ' '.join(text_lines)
+            print(f"✅ Captions fetched via {instance} [Lang: {chosen.get('languageCode','?')}] ({len(script)} chars)")
+            break
+
+        except Exception as e:
+            print(f"⚠️ {instance} failed: {e}")
+            continue
+
+    if not script:
+        print("❌ All Invidious instances failed to return captions.")
 
     return title, script
 
