@@ -59,10 +59,15 @@ def generate_audio(text, output_path):
         print("✅ Piper model ready.")
 
     voice = PiperVoice.load(onnx_path, config_path=config_path, use_cuda=False)
+    
+    # Set speed (length_scale < 1 is faster)
+    voice.config.length_scale = round(1.0 / PIPER_SPEED, 3)
 
-    # length_scale < 1 speeds up speech (inverse of PIPER_SPEED)
     with wave.open(output_path, "wb") as wav_file:
-        voice.synthesize(text, wav_file, length_scale=round(1.0 / PIPER_SPEED, 3))
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2) # 16-bit
+        wav_file.setframerate(voice.config.sample_rate)
+        voice.synthesize(text, wav_file)
 
     print(f"✅ Audio generated: {output_path}")
     return output_path
