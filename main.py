@@ -1,15 +1,12 @@
 import os
-import re
 import time
 import json
+import wave
 import warnings
 import subprocess
 import requests
 import gspread
 from PIL import Image
-from gtts import gTTS
-from pydub import AudioSegment
-from pydub.effects import speedup
 from duckduckgo_search import DDGS
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -20,7 +17,9 @@ IMAGE_COUNT = 20
 TARGET_SIZE = (1920, 1080)
 DOWNLOAD_DIR = "video_images"
 OUTPUT_VIDEO = "drama_final_video.mp4"
-AUDIO_SPEEDUP_FACTOR = 1.25
+PIPER_SPEED   = 1.25            # >1 = faster speech (same as old AUDIO_SPEEDUP_FACTOR)
+PIPER_MODEL_DIR  = "piper_model"  # never cleaned up between iterations
+PIPER_MODEL_NAME = "hi_IN-harini-medium"
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def get_gcp_credentials():
@@ -30,19 +29,42 @@ def get_gcp_credentials():
         'https://www.googleapis.com/auth/drive'
     ])
 
-# --- PHASE 1: AUDIO (Direct from Script) ---
+# --- PHASE 1: AUDIO (Piper TTS — offline, no API needed) ---
 def generate_audio(text, output_path):
-    print(f"🎙️ Generating AI Voice from Script...")
-    temp_audio = "temp_gtts.mp3"
-    # Uses gTTS for Hindi
-    tts = gTTS(text=text, lang='hi')
-    tts.save(temp_audio)
-    
-    audio = AudioSegment.from_file(temp_audio)
-    # Speeding it up for engagement
-    fast_audio = speedup(audio, playback_speed=AUDIO_SPEEDUP_FACTOR)
-    fast_audio.export(output_path, format="mp3")
-    os.remove(temp_audio)
+    """Synthesise Hindi speech with Piper TTS.
+    Model is downloaded once into piper_model/ and reused across all iterations.
+    That directory is intentionally excluded from the per-iteration cleanup."""
+    from piper import PiperVoice
+
+    print("🎙️ Generating AI Voice with Piper TTS...")
+
+    onnx_path   = os.path.join(PIPER_MODEL_DIR, f"{PIPER_MODEL_NAME}.onnx")
+    config_path = os.path.join(PIPER_MODEL_DIR, f"{PIPER_MODEL_NAME}.onnx.json")
+
+    # Download model files if not already present (once per workflow run)
+    if not os.path.exists(onnx_path):
+        os.makedirs(PIPER_MODEL_DIR, exist_ok=True)
+        hf_base = (
+            "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+            "hi/hi_IN/harini/medium/" + PIPER_MODEL_NAME
+        )
+        for ext in [".onnx", ".onnx.json"]:
+            dest = os.path.join(PIPER_MODEL_DIR, PIPER_MODEL_NAME + ext)
+            print(f"⬇️  Downloading {os.path.basename(dest)}...")
+            r = requests.get(hf_base + ext, stream=True, timeout=180)
+            r.raise_for_status()
+            with open(dest, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        print("✅ Piper model ready.")
+
+    voice = PiperVoice.load(onnx_path, config_path=config_path, use_cuda=False)
+
+    # length_scale < 1 speeds up speech (inverse of PIPER_SPEED)
+    with wave.open(output_path, "wb") as wav_file:
+        voice.synthesize(text, wav_file, length_scale=round(1.0 / PIPER_SPEED, 3))
+
+    print(f"✅ Audio generated: {output_path}")
     return output_path
 
 # --- PHASE 2: IMAGES (Full Title Search) ---
@@ -154,7 +176,6 @@ def upload_video_file(file_path):
     except Exception as e:
         print(f"❌ All uploaders failed: {e}")
 
-    return None
 # --- MAIN AUTOMATION LOOP ---
 def main():
     # 1. Initialize Credentials
@@ -189,18 +210,28 @@ def main():
         # Process rows with empty status OR "Pending" status
         status = row.get('Status', '').strip()
         if status == '' or status == 'Pending':
-            print(f"\n🚀 Processing: {row['Title']}")
             try:
                 sheet.update_cell(row_num, 4, "Processing")
-                
+
+                # --- Read Title & Script directly from sheet ---
+                title  = row.get('Title', '').strip()
+                script = row.get('Script', '').strip()
+
+                print(f"\n🚀 Processing: {title or '(no title)'}")
+
+                if not script:
+                    print(f"❌ No script available (no Script text and no transcript). Skipping.")
+                    sheet.update_cell(row_num, 4, "No Script")
+                    continue
+
                 # 1. Voice from Script
-                generate_audio(row['Script'], "voice.mp3")
+                generate_audio(script, "voice.wav")
                 
                 # 2. Images from Title
-                download_images(row['Title'])
+                download_images(title)
                 
                 # 3. Assemble Video
-                render_video("voice.mp3", OUTPUT_VIDEO)
+                render_video("voice.wav", OUTPUT_VIDEO)
                 
                 # 4. Upload video (0x0.st → catbox fallback)
                 video_url = upload_video_file(OUTPUT_VIDEO)
@@ -208,7 +239,7 @@ def main():
                 if video_url:
                     # 5. Update Sheet
                     sheet.update_cell(row_num, 4, "Completed")
-                    sheet.update_cell(row_num, 5, video_url)
+                    sheet.update_cell(row_num, 6, video_url)
                     print(f"✅ Updated sheet with Drive link: {video_url}")
                 else:
                     sheet.update_cell(row_num, 4, "Upload Failed")
@@ -218,8 +249,8 @@ def main():
                     for f in os.listdir(DOWNLOAD_DIR): 
                         os.remove(os.path.join(DOWNLOAD_DIR, f))
                 
-                # Clean up temp files
-                if os.path.exists("voice.mp3"): os.remove("voice.mp3")
+                # Clean up temp files (piper_model/ is intentionally kept)
+                if os.path.exists("voice.wav"): os.remove("voice.wav")
                 if os.path.exists("list.txt"): os.remove("list.txt")
                 if os.path.exists(OUTPUT_VIDEO): os.remove(OUTPUT_VIDEO)
                 
