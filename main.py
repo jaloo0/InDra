@@ -102,8 +102,11 @@ def download_images(query):
 
 # --- PHASE 3: FAST VIDEO ASSEMBLY ---
 def get_duration(path):
-    cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', path]
-    return float(subprocess.run(cmd, stdout=subprocess.PIPE).stdout)
+    # calculate exact duration native to Python since the file is a standard WAV
+    with wave.open(path, 'r') as wav_file:
+        frames = wav_file.getnframes()
+        rate = wav_file.getframerate()
+        return float(frames) / float(rate)
 
 def render_video(audio_path, output_path):
     img_files = sorted([f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.jpg')])
