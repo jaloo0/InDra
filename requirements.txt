@@ -7,4 +7,3 @@ gtts
 pydub
 Pillow
 duckduckgo_search
-yt-dlp
