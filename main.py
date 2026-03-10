@@ -154,69 +154,7 @@ def upload_video_file(file_path):
     except Exception as e:
         print(f"❌ All uploaders failed: {e}")
 
-# --- YOUTUBE INFO EXTRACTOR ---
-def get_youtube_info(url):
-    """Fetches title and transcript via yt-dlp (client impersonation bypasses bot blocks)."""
-    import yt_dlp
-
-    print(f"🔗 Fetching info via yt-dlp...")
-
-    ydl_opts = {
-        'quiet': True,
-        'skip_download': True,
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'subtitlesformat': 'json3',
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = info.get('title', '')
-            print(f"📺 YouTube Title: {title}")
-
-            subs = info.get('subtitles') or {}
-            auto_subs = info.get('automatic_captions') or {}
-            all_subs = {**auto_subs, **subs}  # manual subs override auto
-
-            if not all_subs:
-                print("❌ No subtitles/captions found on this video.")
-                return title, None
-
-            # Try preferred languages, then fall back to first available
-            preferred = ['hi', 'ur', 'en', 'hi-IN', 'en-IN']
-            lang_to_use = next((l for l in preferred if l in all_subs), None)
-            if not lang_to_use:
-                lang_to_use = next(iter(all_subs))
-
-            # Get the json3 format URL
-            fmt = next((f for f in all_subs[lang_to_use] if f.get('ext') == 'json3'), None)
-            if not fmt:
-                fmt = all_subs[lang_to_use][0]  # take any format available
-
-            sub_url = fmt['url']
-            resp = requests.get(sub_url, timeout=20)
-            if resp.status_code != 200:
-                print(f"❌ Could not download subtitle file (HTTP {resp.status_code})")
-                return title, None
-
-            # Parse json3 format
-            data = resp.json()
-            lines = []
-            for event in data.get('events', []):
-                for seg in event.get('segs', []):
-                    text = seg.get('utf8', '').strip()
-                    if text and text != '\n':
-                        lines.append(text)
-
-            script = re.sub(r' +', ' ', ' '.join(lines))
-            print(f"✅ Transcript via yt-dlp [Lang: {lang_to_use}] ({len(script)} chars)")
-            return title, script
-
-    except Exception as e:
-        print(f"⚠️ yt-dlp failed: {e}")
-        return None, None
-
+    return None
 # --- MAIN AUTOMATION LOOP ---
 def main():
     # 1. Initialize Credentials
@@ -251,34 +189,15 @@ def main():
         # Process rows with empty status OR "Pending" status
         status = row.get('Status', '').strip()
         if status == '' or status == 'Pending':
+            print(f"\n🚀 Processing: {row['Title']}")
             try:
-                sheet.update_cell(row_num, 4, "Processing")
-
-                # --- Resolve Title & Script (Sheet OR YouTube link) ---
-                yt_link = row.get('yt link', '').strip()
-                title  = row.get('Title', '').strip()
-                script = row.get('Script', '').strip()
-
-                if yt_link:
-                    print(f"🔗 YouTube link found — fetching title & transcript...")
-                    yt_title, yt_script = get_youtube_info(yt_link)
-                    if yt_title:
-                        title = yt_title
-                    if yt_script:
-                        script = yt_script
-
-                print(f"\n🚀 Processing: {title or yt_link or '(no title)'}")
-
-                if not script:
-                    print(f"❌ No script available (no Script text and no transcript). Skipping.")
-                    sheet.update_cell(row_num, 4, "No Script")
-                    continue
-
+                sheet.update_cell(row_num, 3, "Processing")
+                
                 # 1. Voice from Script
-                generate_audio(script, "voice.mp3")
+                generate_audio(row['Script'], "voice.mp3")
                 
                 # 2. Images from Title
-                download_images(title)
+                download_images(row['Title'])
                 
                 # 3. Assemble Video
                 render_video("voice.mp3", OUTPUT_VIDEO)
@@ -288,11 +207,11 @@ def main():
                 
                 if video_url:
                     # 5. Update Sheet
-                    sheet.update_cell(row_num, 4, "Completed")
-                    sheet.update_cell(row_num, 6, video_url)
+                    sheet.update_cell(row_num, 3, "Completed")
+                    sheet.update_cell(row_num, 4, video_url)
                     print(f"✅ Updated sheet with Drive link: {video_url}")
                 else:
-                    sheet.update_cell(row_num, 4, "Upload Failed")
+                    sheet.update_cell(row_num, 3, "Upload Failed")
                 
                 # Cleanup for next loop
                 if os.path.exists(DOWNLOAD_DIR):
@@ -309,7 +228,7 @@ def main():
                 error_msg = traceback.format_exc()
                 print(f"❌ Failed processing '{row['Title']}':")
                 print(error_msg)
-                sheet.update_cell(row_num, 4, f"Error: {str(e)[:50]}")
+                sheet.update_cell(row_num, 3, f"Error: {str(e)[:50]}")
 
 if __name__ == "__main__":
     main()
