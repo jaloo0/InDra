@@ -191,7 +191,7 @@ def main():
         if status == '' or status == 'Pending':
             print(f"\n🚀 Processing: {row['Title']}")
             try:
-                sheet.update_cell(row_num, 3, "Processing")
+                sheet.update_cell(row_num, 4, "Processing")
                 
                 # 1. Voice from Script
                 generate_audio(row['Script'], "voice.mp3")
@@ -207,11 +207,11 @@ def main():
                 
                 if video_url:
                     # 5. Update Sheet
-                    sheet.update_cell(row_num, 3, "Completed")
-                    sheet.update_cell(row_num, 4, video_url)
+                    sheet.update_cell(row_num, 4, "Completed")
+                    sheet.update_cell(row_num, 5, video_url)
                     print(f"✅ Updated sheet with Drive link: {video_url}")
                 else:
-                    sheet.update_cell(row_num, 3, "Upload Failed")
+                    sheet.update_cell(row_num, 4, "Upload Failed")
                 
                 # Cleanup for next loop
                 if os.path.exists(DOWNLOAD_DIR):
@@ -228,7 +228,7 @@ def main():
                 error_msg = traceback.format_exc()
                 print(f"❌ Failed processing '{row['Title']}':")
                 print(error_msg)
-                sheet.update_cell(row_num, 3, f"Error: {str(e)[:50]}")
+                sheet.update_cell(row_num, 4, f"Error: {str(e)[:50]}")
 
 if __name__ == "__main__":
     main()
