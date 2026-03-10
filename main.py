@@ -19,7 +19,7 @@ DOWNLOAD_DIR = "video_images"
 OUTPUT_VIDEO = "drama_final_video.mp4"
 PIPER_SPEED   = 1.25            # >1 = faster speech (same as old AUDIO_SPEEDUP_FACTOR)
 PIPER_MODEL_DIR  = "piper_model"  # never cleaned up between iterations
-PIPER_MODEL_NAME = "hi_IN-harini-medium"
+PIPER_MODEL_NAME = "hi_IN-priyamvada-medium"
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def get_gcp_credentials():
@@ -46,7 +46,7 @@ def generate_audio(text, output_path):
         os.makedirs(PIPER_MODEL_DIR, exist_ok=True)
         hf_base = (
             "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
-            "hi/hi_IN/harini/medium/" + PIPER_MODEL_NAME
+            "hi/hi_IN/priyamvada/medium/" + PIPER_MODEL_NAME
         )
         for ext in [".onnx", ".onnx.json"]:
             dest = os.path.join(PIPER_MODEL_DIR, PIPER_MODEL_NAME + ext)
