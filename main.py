@@ -110,18 +110,36 @@ def get_duration(path):
 
 def render_video(audio_path, output_path):
     img_files = sorted([f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.jpg')])
+    if not img_files:
+        print("❌ No images found to render!")
+        return
+
     duration = get_duration(audio_path)
+    # Each image gets an equal slice of the total audio duration
     img_dur = duration / len(img_files)
     
+    # Create the concat list for FFmpeg
     with open("list.txt", "w") as f:
         for img in img_files:
+            # We use the 'duration' directive after each file
             f.write(f"file '{DOWNLOAD_DIR}/{img}'\nduration {img_dur}\n")
+        # FFmpeg requirement: repeat the last file to define the end point
         f.write(f"file '{DOWNLOAD_DIR}/{img_files[-1]}'\n")
 
-    # Ultra-fast FFmpeg command - explicitly upsample audio to 44.1kHz stereo AAC for universal player compatibility
-    cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -ar 44100 -ac 2 -shortest {output_path}"
-    subprocess.run(cmd, shell=True)
+    print(f"🎬 Rendering video (Duration: {duration:.2f}s)...")
 
+    # CHANGES: 
+    # 1. Removed -shortest
+    # 2. Added -t {duration} to explicitly set the length
+    # 3. Added -pix_fmt yuv420p directly to ensure compatibility
+    cmd = (
+        f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} "
+        f"-c:v libx264 -preset ultrafast -tune stillimage "
+        f"-vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" "
+        f"-r 24 -c:a aac -ar 44100 -ac 2 -t {duration} {output_path}"
+    )
+    
+    subprocess.run(cmd, shell=True)
 # --- FILE UPLOAD (pixeldrain → GoFile → litterbox) ---
 def upload_video_file(file_path):
     """Primary: pixeldrain.com | 2nd: GoFile | 3rd: litterbox.catbox.moe"""
