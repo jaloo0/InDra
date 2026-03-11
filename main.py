@@ -7,6 +7,7 @@ import warnings
 import subprocess
 import requests
 import gspread
+from pydub import AudioSegment
 from PIL import Image
 from duckduckgo_search import DDGS
 from google.oauth2.service_account import Credentials
@@ -71,8 +72,8 @@ def generate_audio(text, output_path):
         wav_file.setframerate(voice.config.sample_rate)
         voice.synthesize(text, wav_file)
 
-    # Convert to MP3 using ffmpeg so it behaves exactly like the old script
-    subprocess.run(["ffmpeg", "-y", "-i", temp_wav, "-c:a", "libmp3lame", "-q:a", "2", output_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # Convert to MP3 using pydub so it behaves exactly like the old script
+    AudioSegment.from_wav(temp_wav).export(output_path, format="mp3")
     os.remove(temp_wav)
 
     print(f"✅ Audio generated: {output_path}")
@@ -107,8 +108,8 @@ def download_images(query):
 
 # --- PHASE 3: FAST VIDEO ASSEMBLY ---
 def get_duration(path):
-    cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', path]
-    return float(subprocess.run(cmd, stdout=subprocess.PIPE).stdout.strip())
+    # pydub is extremely robust and avoids empty ffprobe output errors
+    return AudioSegment.from_file(path).duration_seconds
 
 def render_video(audio_path, output_path):
     img_files = sorted([f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.jpg')])
