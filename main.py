@@ -1,13 +1,15 @@
 import os
-import re
 import time
 import json
-import wave
+import re
 import warnings
 import subprocess
 import requests
 import gspread
 from PIL import Image
+from gtts import gTTS
+from pydub import AudioSegment
+from pydub.effects import speedup
 from duckduckgo_search import DDGS
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -18,9 +20,7 @@ IMAGE_COUNT = 20
 TARGET_SIZE = (1920, 1080)
 DOWNLOAD_DIR = "video_images"
 OUTPUT_VIDEO = "drama_final_video.mp4"
-PIPER_SPEED   = 1.25            # >1 = faster speech (same as old AUDIO_SPEEDUP_FACTOR)
-PIPER_MODEL_DIR  = "piper_model"  # never cleaned up between iterations
-PIPER_MODEL_NAME = "hi_IN-priyamvada-medium"
+AUDIO_SPEEDUP_FACTOR = 1.25
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def get_gcp_credentials():
@@ -30,48 +30,19 @@ def get_gcp_credentials():
         'https://www.googleapis.com/auth/drive'
     ])
 
-# --- PHASE 1: AUDIO (Piper TTS — offline, no API needed) ---
+# --- PHASE 1: AUDIO (Direct from Script) ---
 def generate_audio(text, output_path):
-    """Synthesise Hindi speech with Piper TTS.
-    Model is downloaded once into piper_model/ and reused across all iterations.
-    That directory is intentionally excluded from the per-iteration cleanup."""
-    from piper import PiperVoice
-
-    print("🎙️ Generating AI Voice with Piper TTS...")
-
-    onnx_path   = os.path.join(PIPER_MODEL_DIR, f"{PIPER_MODEL_NAME}.onnx")
-    config_path = os.path.join(PIPER_MODEL_DIR, f"{PIPER_MODEL_NAME}.onnx.json")
-
-    # Download model files if not already present (once per workflow run)
-    if not os.path.exists(onnx_path):
-        os.makedirs(PIPER_MODEL_DIR, exist_ok=True)
-        hf_base = (
-            "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
-            "hi/hi_IN/priyamvada/medium/" + PIPER_MODEL_NAME
-        )
-        for ext in [".onnx", ".onnx.json"]:
-            dest = os.path.join(PIPER_MODEL_DIR, PIPER_MODEL_NAME + ext)
-            print(f"⬇️  Downloading {os.path.basename(dest)}...")
-            r = requests.get(hf_base + ext, stream=True, timeout=180)
-            r.raise_for_status()
-            with open(dest, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        print("✅ Piper model ready.")
-
-    voice = PiperVoice.load(onnx_path, config_path=config_path, use_cuda=False)
+    print(f"🎙️ Generating AI Voice from Script...")
+    temp_audio = "temp_gtts.mp3"
+    # Uses gTTS for Hindi
+    tts = gTTS(text=text, lang='hi')
+    tts.save(temp_audio)
     
-    # Set speed (length_scale < 1 is faster)
-    voice.config.length_scale = round(1.0 / PIPER_SPEED, 3)
-
-    temp_wav = output_path.replace(".mp3", ".wav")
-    with wave.open(output_path, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2) # 16-bit
-        wav_file.setframerate(voice.config.sample_rate)
-        voice.synthesize(text, wav_file)
-
-    print(f"✅ Audio generated: {output_path}")
+    audio = AudioSegment.from_file(temp_audio)
+    # Speeding it up for engagement
+    fast_audio = speedup(audio, playback_speed=AUDIO_SPEEDUP_FACTOR)
+    fast_audio.export(output_path, format="mp3")
+    os.remove(temp_audio)
     return output_path
 
 # --- PHASE 2: IMAGES (Full Title Search) ---
@@ -103,43 +74,23 @@ def download_images(query):
 
 # --- PHASE 3: FAST VIDEO ASSEMBLY ---
 def get_duration(path):
-    with wave.open(path, 'r') as wav_file:
-        frames = wav_file.getnframes()
-        rate = wav_file.getframerate()
-        return float(frames) / float(rate)
+    cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', path]
+    return float(subprocess.run(cmd, stdout=subprocess.PIPE).stdout)
 
 def render_video(audio_path, output_path):
     img_files = sorted([f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.jpg')])
-    if not img_files:
-        print("❌ No images found to render!")
-        return
-
     duration = get_duration(audio_path)
-    # Each image gets an equal slice of the total audio duration
     img_dur = duration / len(img_files)
     
-    # Create the concat list for FFmpeg
     with open("list.txt", "w") as f:
         for img in img_files:
-            # We use the 'duration' directive after each file
             f.write(f"file '{DOWNLOAD_DIR}/{img}'\nduration {img_dur}\n")
-        # FFmpeg requirement: repeat the last file to define the end point
         f.write(f"file '{DOWNLOAD_DIR}/{img_files[-1]}'\n")
 
-    print(f"🎬 Rendering video (Duration: {duration:.2f}s)...")
-
-    # CHANGES: 
-    # 1. Removed -shortest
-    # 2. Added -t {duration} to explicitly set the length
-    # 3. Added -pix_fmt yuv420p directly to ensure compatibility
-    cmd = (
-        f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} "
-        f"-c:v libx264 -preset ultrafast -tune stillimage "
-        f"-vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" "
-        f"-r 24 -c:a aac -ar 44100 -ac 2 -t {duration} {output_path}"
-    )
-    
+    # Ultra-fast FFmpeg command
+    cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
     subprocess.run(cmd, shell=True)
+
 # --- FILE UPLOAD (pixeldrain → GoFile → litterbox) ---
 def upload_video_file(file_path):
     """Primary: pixeldrain.com | 2nd: GoFile | 3rd: litterbox.catbox.moe"""
@@ -252,13 +203,13 @@ def main():
                     continue
 
                 # 1. Voice from Script
-                generate_audio(script, "voice.wav")
+                generate_audio(script, "voice.mp3")
                 
                 # 2. Images from Title
                 download_images(title)
                 
                 # 3. Assemble Video
-                render_video("voice.wav", OUTPUT_VIDEO)
+                render_video("voice.mp3", OUTPUT_VIDEO)
                 
                 # 4. Upload video (0x0.st → catbox fallback)
                 video_url = upload_video_file(OUTPUT_VIDEO)
@@ -276,8 +227,8 @@ def main():
                     for f in os.listdir(DOWNLOAD_DIR): 
                         os.remove(os.path.join(DOWNLOAD_DIR, f))
                 
-                # Clean up temp files (piper_model/ is intentionally kept)
-                if os.path.exists("voice.wav"): os.remove("voice.wav")
+                # Clean up temp files
+                if os.path.exists("voice.mp3"): os.remove("voice.mp3")
                 if os.path.exists("list.txt"): os.remove("list.txt")
                 if os.path.exists(OUTPUT_VIDEO): os.remove(OUTPUT_VIDEO)
                 
