@@ -4,5 +4,6 @@ google-api-python-client
 requests
 beautifulsoup4
 piper-tts
+pydub
 Pillow
 duckduckgo_search
