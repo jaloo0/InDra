@@ -7,7 +7,6 @@ import warnings
 import subprocess
 import requests
 import gspread
-from pydub import AudioSegment
 from PIL import Image
 from duckduckgo_search import DDGS
 from google.oauth2.service_account import Credentials
@@ -66,15 +65,11 @@ def generate_audio(text, output_path):
     voice.config.length_scale = round(1.0 / PIPER_SPEED, 3)
 
     temp_wav = output_path.replace(".mp3", ".wav")
-    with wave.open(temp_wav, "wb") as wav_file:
+    with wave.open(output_path, "wb") as wav_file:
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2) # 16-bit
         wav_file.setframerate(voice.config.sample_rate)
         voice.synthesize(text, wav_file)
-
-    # Convert to MP3 using pydub so it behaves exactly like the old script
-    AudioSegment.from_wav(temp_wav).export(output_path, format="mp3")
-    os.remove(temp_wav)
 
     print(f"✅ Audio generated: {output_path}")
     return output_path
@@ -108,8 +103,10 @@ def download_images(query):
 
 # --- PHASE 3: FAST VIDEO ASSEMBLY ---
 def get_duration(path):
-    # pydub is extremely robust and avoids empty ffprobe output errors
-    return AudioSegment.from_file(path).duration_seconds
+    with wave.open(path, 'r') as wav_file:
+        frames = wav_file.getnframes()
+        rate = wav_file.getframerate()
+        return float(frames) / float(rate)
 
 def render_video(audio_path, output_path):
     img_files = sorted([f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.jpg')])
@@ -121,8 +118,8 @@ def render_video(audio_path, output_path):
             f.write(f"file '{DOWNLOAD_DIR}/{img}'\nduration {img_dur}\n")
         f.write(f"file '{DOWNLOAD_DIR}/{img_files[-1]}'\n")
 
-    # Ultra-fast FFmpeg command
-    cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -shortest {output_path}"
+    # Ultra-fast FFmpeg command - explicitly upsample audio to 44.1kHz stereo AAC for universal player compatibility
+    cmd = f"ffmpeg -y -f concat -safe 0 -i list.txt -i {audio_path} -c:v libx264 -preset ultrafast -tune stillimage -vf \"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p\" -r 24 -c:a aac -ar 44100 -ac 2 -shortest {output_path}"
     subprocess.run(cmd, shell=True)
 
 # --- FILE UPLOAD (pixeldrain → GoFile → litterbox) ---
@@ -237,13 +234,13 @@ def main():
                     continue
 
                 # 1. Voice from Script
-                generate_audio(script, "voice.mp3")
+                generate_audio(script, "voice.wav")
                 
                 # 2. Images from Title
                 download_images(title)
                 
                 # 3. Assemble Video
-                render_video("voice.mp3", OUTPUT_VIDEO)
+                render_video("voice.wav", OUTPUT_VIDEO)
                 
                 # 4. Upload video (0x0.st → catbox fallback)
                 video_url = upload_video_file(OUTPUT_VIDEO)
@@ -262,7 +259,7 @@ def main():
                         os.remove(os.path.join(DOWNLOAD_DIR, f))
                 
                 # Clean up temp files (piper_model/ is intentionally kept)
-                if os.path.exists("voice.mp3"): os.remove("voice.mp3")
+                if os.path.exists("voice.wav"): os.remove("voice.wav")
                 if os.path.exists("list.txt"): os.remove("list.txt")
                 if os.path.exists(OUTPUT_VIDEO): os.remove(OUTPUT_VIDEO)
                 
