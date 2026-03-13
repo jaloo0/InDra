@@ -174,8 +174,10 @@ def main():
         print(f"❌ Connection Failed: {e}")
         return
     
-    records = sheet.get_all_records()
-    
+    # records = sheet.get_all_records()
+
+    expected_headers = ['Title', 'Script', 'yt link', 'Status', 'Voice', 'Video Link']
+    records = sheet.get_all_records(expected_headers=expected_headers)
     print(f"📊 Found {len(records)} total rows in spreadsheet")
     if len(records) > 0:
         print(f"🔍 Column names: {list(records[0].keys())}")
