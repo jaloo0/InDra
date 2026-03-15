@@ -20,7 +20,7 @@ IMAGE_COUNT = 20
 TARGET_SIZE = (1920, 1080)
 DOWNLOAD_DIR = "video_images"
 OUTPUT_VIDEO = "drama_final_video.mp4"
-AUDIO_SPEEDUP_FACTOR = 1.25
+AUDIO_SPEEDUP_FACTOR = 1.4
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def get_gcp_credentials():
